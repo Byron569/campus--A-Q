@@ -101,3 +101,19 @@ def get_llm(settings: Settings | None = None, *, streaming: bool = False) -> Cha
         timeout=REQUEST_TIMEOUT,
         max_retries=MAX_RETRIES,
     )
+
+
+def response_text(response) -> str:
+    """从模型响应里取出纯文本。
+
+    OpenAI 兼容协议下 `content` 通常是字符串，但部分供应商会返回分段内容
+    （`list[dict]`），这里统一成字符串，避免上层各写一遍。
+    """
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
+    return str(content)

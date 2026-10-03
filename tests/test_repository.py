@@ -12,17 +12,26 @@ import pytest
 
 from src.repository import (
     DOC_DELETED,
+    ROLE_ASSISTANT,
+    ROLE_USER,
     TASK_DONE,
     TASK_FAILED,
     TASK_PENDING,
     TASK_RUNNING,
+    add_message,
+    add_metric,
+    add_sources,
+    create_conversation,
     create_document,
     create_task,
     exists_active_task,
+    get_conversation,
     get_document,
     get_task,
     get_task_by_doc,
     list_documents,
+    list_messages,
+    list_sources_by_message,
     list_tasks_by_user,
     recover_stale_tasks,
     reset_task,
@@ -30,6 +39,7 @@ from src.repository import (
     update_chunk_count,
     update_task,
 )
+from src.store.chroma import SearchHit
 from src.store.db import get_conn, init_db
 
 
@@ -302,3 +312,116 @@ def test_recover_stale_tasks_marks_running_as_failed(db: Path) -> None:
 def test_recover_stale_tasks_noop_when_nothing_running(db: Path) -> None:
     create_task(make_doc(db), db_path=db)
     assert recover_stale_tasks(db_path=db) == 0
+
+
+# ==================== conversations / messages ====================
+
+
+def test_create_and_get_conversation(db: Path) -> None:
+    conversation_id = create_conversation(1, title="宿舍怎么搬", db_path=db)
+    conversation = get_conversation(conversation_id, db_path=db)
+
+    assert conversation is not None
+    assert conversation.user_id == 1
+    assert conversation.title == "宿舍怎么搬"
+
+
+def test_create_conversation_blank_title_stored_as_empty(db: Path) -> None:
+    assert get_conversation(create_conversation(1, title="   ", db_path=db), db_path=db).title == ""
+
+
+def test_get_missing_conversation_returns_none(db: Path) -> None:
+    assert get_conversation(999, db_path=db) is None
+
+
+def test_messages_are_returned_in_time_order(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    add_message(conversation_id, ROLE_USER, "第一问", db_path=db)
+    add_message(conversation_id, ROLE_ASSISTANT, "第一答", db_path=db)
+    add_message(conversation_id, ROLE_USER, "第二问", db_path=db)
+
+    messages = list_messages(conversation_id, db_path=db)
+
+    assert [m.content for m in messages] == ["第一问", "第一答", "第二问"]
+    assert [m.role for m in messages] == [ROLE_USER, ROLE_ASSISTANT, ROLE_USER]
+
+
+def test_list_messages_limit_keeps_latest_in_forward_order(db: Path) -> None:
+    """取最近 N 条时要**正序**返回，否则会把历史倒着喂给模型。"""
+    conversation_id = create_conversation(1, db_path=db)
+    for index in range(5):
+        add_message(conversation_id, ROLE_USER, f"第{index}问", db_path=db)
+
+    messages = list_messages(conversation_id, limit=2, db_path=db)
+
+    assert [m.content for m in messages] == ["第3问", "第4问"]
+
+
+def test_add_message_touches_conversation_updated_at(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    with get_conn(db) as conn:
+        conn.execute(
+            "UPDATE conversations SET updated_at = '2000-01-01 00:00:00' WHERE id = ?",
+            (conversation_id,),
+        )
+
+    add_message(conversation_id, ROLE_USER, "新消息", db_path=db)
+
+    assert get_conversation(conversation_id, db_path=db).updated_at > "2000-01-01 00:00:00"
+
+
+# ==================== message_sources / qa_metrics ====================
+
+
+def test_add_and_list_sources(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "答案【来源1】", db_path=db)
+    hits = [
+        SearchHit(text="片段一", score=0.8, filename="a.pdf", doc_id=1,
+                  chunk_index=0, category="freshman", matched_by="both"),
+        SearchHit(text="片段二", score=None, filename="b.pdf", doc_id=2,
+                  chunk_index=3, category="admin", matched_by="bm25"),
+    ]
+
+    add_sources(message_id, hits, db_path=db)
+    saved = list_sources_by_message(message_id, db_path=db)
+
+    assert [row["filename"] for row in saved] == ["a.pdf", "b.pdf"]
+    assert [row["matched_by"] for row in saved] == ["both", "bm25"]
+    assert saved[1]["score"] is None  # 仅向量路可得相似度（DR-15）
+
+
+def test_add_sources_with_empty_list_is_noop(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "拒答", db_path=db)
+
+    add_sources(message_id, [], db_path=db)
+
+    assert list_sources_by_message(message_id, db_path=db) == []
+
+
+def test_add_metric_stores_no_user_identity(db: Path) -> None:
+    """qa_metrics 是脱敏表：不存 user_id、不存问题原文。"""
+    add_metric(question_len=12, answerable=True, top_doc_id=7, top_score=0.79,
+               latency_ms=830, degraded=False, db_path=db)
+
+    with get_conn(db) as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(qa_metrics)")}
+        row = conn.execute("SELECT * FROM qa_metrics").fetchone()
+
+    assert "user_id" not in columns
+    assert row["question_len"] == 12
+    assert row["answerable"] == 1
+    assert row["top_doc_id"] == 7
+    assert row["degraded"] == 0
+
+
+def test_add_metric_marks_refusal_and_degradation(db: Path) -> None:
+    add_metric(question_len=5, answerable=False, latency_ms=3, db_path=db)
+    add_metric(question_len=5, answerable=True, degraded=True, db_path=db)
+
+    with get_conn(db) as conn:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM qa_metrics ORDER BY id")]
+
+    assert [row["answerable"] for row in rows] == [0, 1]
+    assert [row["degraded"] for row in rows] == [0, 1]

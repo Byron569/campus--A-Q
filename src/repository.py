@@ -2,9 +2,10 @@
 
 设计依据：docs/06-接口文档.md §1.5
 
-范围说明：本模块按「用到才写」推进。Sprint 1 只实现 documents 与 ingest_tasks
-（M1-11 的范围）；conversations / messages / feedback / qa_metrics 的访问函数
-将随 Sprint 2、Sprint 3 各自的功能块补齐，避免提前造无人调用的代码。
+范围说明：本模块按「用到才写」推进。Sprint 1 实现了 documents 与 ingest_tasks
+（M1-11）；FB-2.2 的问答主链路落库需要，补齐 conversations / messages /
+message_sources / qa_metrics 的写入与读取。会话的切换 / 重命名 / 删除（M2-06）
+与 feedback、metrics 清理（M2-05 / M3-08）仍留到各自功能块，避免提前造无人调用的代码。
 """
 
 from __future__ import annotations
@@ -12,10 +13,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Sequence
 
 from src.store.db import get_conn
 
+if TYPE_CHECKING:  # 仅用于类型标注，避免数据访问层反向依赖向量层
+    from src.store.chroma import SearchHit
+
 logger = logging.getLogger(__name__)
+
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
 
 DOC_ACTIVE = "active"
 DOC_DELETED = "deleted"
@@ -65,6 +73,44 @@ class IngestTask:
 
 
 PathLike = Path | str | None
+
+
+@dataclass
+class Conversation:
+    id: int
+    user_id: int
+    title: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class Message:
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    created_at: str
+
+
+def _to_conversation(row) -> Conversation:
+    return Conversation(
+        id=row["id"],
+        user_id=row["user_id"],
+        title=row["title"] or "",
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_message(row) -> Message:
+    return Message(
+        id=row["id"],
+        conversation_id=row["conversation_id"],
+        role=row["role"],
+        content=row["content"],
+        created_at=row["created_at"],
+    )
 
 
 def _to_document(row) -> Document:
@@ -343,3 +389,133 @@ def recover_stale_tasks(db_path: PathLike = None) -> int:
     if count:
         logger.warning("发现 %d 个中断的入库任务，已标记为失败待重试", count)
     return count
+
+
+# ==================== conversations / messages ====================
+
+
+def create_conversation(
+    user_id: int, *, title: str | None = None, db_path: PathLike = None
+) -> int:
+    """新建会话，返回 conversation_id。空标题存 NULL，展示层再兜底。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO conversations (user_id, title) VALUES (?, ?)",
+            (user_id, (title or "").strip() or None),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_conversation(conversation_id: int, db_path: PathLike = None) -> Conversation | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+    return _to_conversation(row) if row else None
+
+
+def add_message(
+    conversation_id: int, role: str, content: str, db_path: PathLike = None
+) -> int:
+    """追加一条消息，并顺带刷新会话的 updated_at（列表按最近活动排序）。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
+            (conversation_id, role, content),
+        )
+        conn.execute(
+            """
+            UPDATE conversations
+               SET updated_at = datetime('now','localtime')
+             WHERE id = ?
+            """,
+            (conversation_id,),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_messages(
+    conversation_id: int, *, limit: int | None = None, db_path: PathLike = None
+) -> list[Message]:
+    """按时间正序返回消息。
+
+    `limit` 表示**取最近 N 条**（用于多轮改写），返回时仍按时间正序——
+    顺序反了会把历史倒着喂给模型。
+    """
+    with get_conn(db_path) as conn:
+        if limit is not None and limit > 0:
+            rows = conn.execute(
+                """
+                SELECT * FROM (
+                    SELECT * FROM messages WHERE conversation_id = ?
+                     ORDER BY id DESC LIMIT ?
+                ) ORDER BY id ASC
+                """,
+                (conversation_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC",
+                (conversation_id,),
+            ).fetchall()
+    return [_to_message(row) for row in rows]
+
+
+# ==================== message_sources / qa_metrics ====================
+
+
+def add_sources(
+    message_id: int, sources: Sequence["SearchHit"], db_path: PathLike = None
+) -> None:
+    """写入引用溯源。`matched_by` 记录该来源是向量路 / 关键词路 / 两路命中（DR-15）。"""
+    if not sources:
+        return
+    with get_conn(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO message_sources (message_id, doc_id, filename, snippet, score, matched_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (message_id, hit.doc_id, hit.filename, hit.text, hit.score, hit.matched_by)
+                for hit in sources
+            ],
+        )
+
+
+def list_sources_by_message(message_id: int, db_path: PathLike = None) -> list[dict]:
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM message_sources WHERE message_id = ? ORDER BY id ASC",
+            (message_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def add_metric(
+    *,
+    question_len: int,
+    answerable: bool,
+    top_doc_id: int | None = None,
+    top_score: float | None = None,
+    latency_ms: int | None = None,
+    degraded: bool = False,
+    db_path: PathLike = None,
+) -> None:
+    """写一条脱敏问答指标（不存 user_id、不存问题原文）。"""
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO qa_metrics
+                (question_len, answerable, top_doc_id, top_score, latency_ms, degraded)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                question_len,
+                1 if answerable else 0,
+                top_doc_id,
+                top_score,
+                latency_ms,
+                1 if degraded else 0,
+            ),
+        )
