@@ -8,10 +8,10 @@
 
 from __future__ import annotations
 
-from app import DEFAULT_PAGE, PAGES, PAGES_BY_KEY, _ICONS, resolve_page
+from app import DEFAULT_PAGE, PAGES, PAGES_BY_KEY, resolve_page
 
-# 截至 M3 已实现的页面：问答（M2-05）、我的文档（M1-18）、关于（M3-17）
-IMPLEMENTED_PAGES = {"qa", "documents", "about"}
+# 截至 M3 已实现的页面：问答（M2-05）、我的文档（M1-18）、设置（M3-16）、关于（M3-17）
+IMPLEMENTED_PAGES = {"qa", "documents", "settings", "about"}
 
 
 def test_navigation_has_the_five_designed_entries() -> None:
@@ -24,10 +24,14 @@ def test_navigation_has_the_five_designed_entries() -> None:
     ]
 
 
-def test_every_nav_entry_has_its_lucide_icon() -> None:
-    """docs/07 §7：五个导航项各有指定图标，不能漏画。"""
-    assert set(_ICONS) == {page["key"] for page in PAGES}
-    assert all(svg.strip() for svg in _ICONS.values())
+def test_every_nav_entry_has_an_icon() -> None:
+    """五个导航项各有图标，不能漏。
+
+    图标实现由设计指定的 lucide 换成 Streamlit 的 Material（导航已改为按钮，
+    按钮只接受 Material 图标），该差异见 FB-3.2 自审清单。
+    """
+    assert all(page["icon"].startswith(":material/") for page in PAGES)
+    assert len({page["icon"] for page in PAGES}) == len(PAGES)
 
 
 def test_unimplemented_pages_declare_their_milestone() -> None:

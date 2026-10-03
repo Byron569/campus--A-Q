@@ -37,6 +37,23 @@ INVALID_CREDENTIALS_TEXT = "用户名或密码错误"
 DISABLED_TEXT = "账号已被禁用，请联系管理员"
 AGREEMENT_REQUIRED_TEXT = "请先勾选《用户协议与隐私说明》"
 
+# 仅 admin 可访问的页面 key（docs/05 §G-02）
+ADMIN_PAGES = frozenset({"admin"})
+
+
+def can_access_page(user: User | None, page_key: str) -> bool:
+    """页面访问判定（纯函数，便于单测）。
+
+    - 未登录：一律不可访问（docs/05 §G-01 访客拦截）
+    - 管理员页：仅 admin（§G-02）
+    - 其余页面：登录用户均可
+    """
+    if user is None:
+        return False
+    if page_key in ADMIN_PAGES:
+        return user.is_admin
+    return True
+
 
 def validate_username(username: str) -> str:
     """校验用户名。返回空串表示通过。"""

@@ -381,20 +381,16 @@ COMPONENTS = """
   text-align: center; color: var(--muted-foreground); font-size: 13px;
 }
 
-/* 侧边栏导航（对应模板 sidebar-nav 的 .rail / .nav / .item / .footer）
-   选择器统一带 [data-testid="stSidebar"] 前缀，压过 Streamlit 对 <a> 的全局样式 */
+/* 侧边栏（对应模板 sidebar-nav）
+   导航改用 Streamlit 按钮实现，**不再是 <a>**：链接跳转会重建 Streamlit 会话，
+   把存在会话里的登录态一并丢掉（FB-3.2 浏览器实测的缺陷）。
+   因此这里不再保留链接式导航的自有样式类，改为直接约束按钮外观。 */
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0 !important; }
 [data-testid="stSidebar"] [data-testid="stElementContainer"] { padding: 0 !important; }
-[data-testid="stSidebar"] a,
-[data-testid="stSidebar"] a:hover,
-[data-testid="stSidebar"] a:visited { text-decoration: none !important; }
 
-[data-testid="stSidebar"] .cqa-rail {
-  display: flex; flex-direction: column;
-  padding: var(--space-2) var(--space-1) var(--space-8);
-}
 [data-testid="stSidebar"] .cqa-brand {
-  display: flex; align-items: center; gap: 10px; padding: 10px 11px 14px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 11px 14px;
 }
 [data-testid="stSidebar"] .cqa-brandmark {
   width: 30px; height: 30px; flex: none; display: grid; place-items: center;
@@ -407,35 +403,29 @@ COMPONENTS = """
   font-size: 12px; color: var(--muted-foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-[data-testid="stSidebar"] .cqa-nav { display: flex; flex-direction: column; gap: 2px; }
-[data-testid="stSidebar"] .cqa-nav-item {
-  display: flex; align-items: center; gap: 11px;
-  padding: 9px 11px; border-radius: var(--radius-control);
-  color: var(--sidebar-foreground); font-size: 14px; font-weight: 400;
-  transition: background .14s, color .14s;
-}
-[data-testid="stSidebar"] .cqa-nav-item:hover {
-  background: color-mix(in srgb, var(--background) 64%, var(--sidebar));
-  color: var(--foreground);
-}
-[data-testid="stSidebar"] .cqa-nav-item.is-active {
-  background: var(--background); color: var(--foreground); font-weight: 600;
-}
-[data-testid="stSidebar"] .cqa-nav-item:focus-visible {
-  outline: 2px solid var(--ring) !important; outline-offset: 2px;
-}
-[data-testid="stSidebar"] .cqa-nav-icon {
-  width: 18px; height: 18px; flex: none;
-  color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
-}
-[data-testid="stSidebar"] .cqa-nav-item.is-active .cqa-nav-icon { color: var(--primary); }
-[data-testid="stSidebar"] .cqa-navlabel {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 [data-testid="stSidebar"] .cqa-railfoot {
   margin-top: var(--space-3); padding: 10px 11px;
   border-top: 1px solid var(--sidebar-border);
   font-size: 12px; color: var(--muted-foreground);
+}
+
+/* 导航 / 会话 / 退出登录 按钮统一成「左侧列表项」外观 */
+[data-testid="stSidebar"] .stButton { margin: 0 0 2px; }
+[data-testid="stSidebar"] .stButton > button {
+  width: 100%; height: 38px !important; min-height: 38px !important;
+  justify-content: flex-start;
+  border-radius: var(--radius-control) !important;
+  border-color: transparent;
+  background: transparent;
+  font-size: 14px !important; font-weight: 400;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: color-mix(in srgb, var(--background) 64%, var(--sidebar));
+}
+/* 当前页：模板的选中项是白底加粗，这里用主色按钮表达选中 */
+[data-testid="stSidebar"] .stButton > button[kind="primary"] { font-weight: 600; }
+[data-testid="stSidebar"] .stButton > button:focus-visible {
+  outline: 2px solid var(--ring) !important; outline-offset: 2px;
 }
 
 /* ---------- 问答页（PG-02）---------- */
@@ -493,15 +483,9 @@ COMPONENTS = """
   border-top: 1px solid var(--sidebar-border);
   font-size: 12px; font-weight: 600; color: var(--muted-foreground);
 }
-/* 侧栏内的元素间距被上面的 gap:0 压掉了，这里补回来 */
-[data-testid="stSidebar"] .stButton { margin-bottom: 6px; }
-[data-testid="stSidebar"] .stButton > button {
-  width: 100%; justify-content: flex-start;
-  font-size: 13px !important;
-}
 /* 会话行 = 会话名 + ⋯ 菜单，必须留在同一行。
    Streamlit 的列默认 flex-wrap: wrap 且列有 min-width，248px 侧栏里放不下就会
-  把 ⋯ 挤到第二行；这里改成不换行并允许列收缩到 0。 */
+   把 ⋯ 挤到第二行；这里改成不换行并允许列收缩到 0。 */
 [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
   flex-wrap: nowrap !important;
   gap: var(--space-1) !important;
@@ -511,6 +495,17 @@ COMPONENTS = """
 [data-testid="stSidebar"] .stPopover > div > button {
   width: 100%; padding: 0 !important; justify-content: center;
 }
+
+/* 登录 / 注册页（PG-01）：未登录时的唯一入口，居中品牌区 + 表单卡片 */
+.cqa-login-hero { text-align: center; padding: var(--space-8) 0 var(--space-6); }
+.cqa-login-mark {
+  width: 44px; height: 44px; margin: 0 auto var(--space-3);
+  border-radius: 13px; display: grid; place-items: center;
+  font: 600 20px/1 var(--font-sans); color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--chart-1), var(--chart-4));
+}
+.cqa-login-title { font-size: 24px; line-height: 34px; font-weight: 600; }
+.cqa-login-sub { font-size: 13px; color: var(--muted-foreground); margin-top: 2px; }
 """
 
 

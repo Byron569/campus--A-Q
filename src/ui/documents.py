@@ -9,10 +9,10 @@
 这里放在本模块内（docs/02 §3 给 documents.py 的职责就是多选上传 / 进度 / 重试），
 不新增设计目录之外的模块。
 
-**M1 范围说明**：本期尚无登录（认证在 M3-03），页面无法确定上传者身份，
-因此按**公共文档**入库（`is_public=1`、`user_id=NULL`），分类必选，
-与 docs/02 §4.10「管理员上传公共文档必须指定分类」一致。
-个人文档页随 M3 的登录能力一起到位；M3-04 管理员页接管公共文档上传。
+**身份与归属（FB-3.2 起）**：本页在登录态下运行，上传的资料按**个人文档**入库
+（`is_public=0`、`user_id=当前用户`），只有本人检索得到（FR-31）；
+分类可选，留空归入内置的「未分类」（docs/02 §4.10）。
+公共文档的维护在 M3-04 管理员页（FB-3.3）。
 
 纯逻辑函数（校验 / 落盘 / 级联删除 / 重试）不依赖 Streamlit，可直接单元测试；
 渲染函数只做 st.* 编排。
@@ -45,6 +45,7 @@ from src.repository import (
     TASK_FAILED,
     TASK_PENDING,
     TASK_RUNNING,
+    User,
     create_document,
     create_task,
     exists_active_task,
@@ -296,29 +297,29 @@ def _panel_head(title: str, subtitle: str = "") -> None:
     )
 
 
-def render(*, settings: Settings, store: VectorStore) -> None:
+def render(*, settings: Settings, store: VectorStore, user: User) -> None:
     """渲染整个文档管理页。"""
     st.markdown('<div class="cqa-page-title">我的文档</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="cqa-page-desc">当前版本尚未提供登录（认证在 M3），'
-        "本页上传的文件按公共文档入库，所有用户均可检索到。</div>",
+        '<div class="cqa-page-desc">这里上传的是你的个人资料，只有你本人能在问答里检索到；'
+        "公共资料由管理员在「管理员」页维护。</div>",
         unsafe_allow_html=True,
     )
 
-    _render_upload(settings=settings, store=store)
-    _render_progress(settings=settings)
-    _render_list(settings=settings, store=store)
+    _render_upload(settings=settings, store=store, user=user)
+    _render_progress(settings=settings, user=user)
+    _render_list(settings=settings, store=store, user=user)
 
     # 必须放在最后：进度轮询结束时还会 st.rerun() 一次，若在它之前渲染，
     # 提交结果会只闪一下就没了
     _drain_results()
 
 
-def _render_upload(*, settings: Settings, store: VectorStore) -> None:
+def _render_upload(*, settings: Settings, store: VectorStore, user: User) -> None:
     suffix_hint = " / ".join(sorted(s.lstrip(".").upper() for s in ALLOWED_SUFFIXES))
     _panel_head("上传文档", f"支持 {suffix_hint}，单文件不超过 {settings.max_upload_mb}MB，可多选")
 
-    # 公共文档必须指定分类（docs/02 §4.10），因此不提供「未分类」选项
+    # 个人资料分类可选，留空归入「未分类」（docs/02 §4.10）
     options = [item for item in category_options() if item["key"] != UNCATEGORIZED_KEY]
     label_to_key = {item["name"]: item["key"] for item in options}
 
@@ -331,7 +332,7 @@ def _render_upload(*, settings: Settings, store: VectorStore) -> None:
         )
     with right:
         picked = st.selectbox(
-            "分类（必选）", list(label_to_key), index=None, placeholder="请选择分类"
+            "分类（可选）", list(label_to_key), index=None, placeholder="不选则归入「未分类」"
         )
         start = st.button("开始上传", type="primary")
 
@@ -341,18 +342,20 @@ def _render_upload(*, settings: Settings, store: VectorStore) -> None:
     if not files:
         st.warning("请先选择文件。")
         return
-    if not picked:
-        st.warning("公共文档必须指定分类（docs/02 §4.10）。")
-        return
 
-    category = label_to_key[picked]
+    category = label_to_key[picked] if picked else UNCATEGORIZED_KEY
     submitted: set[str] = st.session_state.setdefault(STATE_SUBMITTED, set())
 
     results: list[tuple[str, str]] = []
     for uploaded in files:
         results.append(
             _submit_one(
-                uploaded, category=category, submitted=submitted, settings=settings, store=store
+                uploaded,
+                category=category,
+                submitted=submitted,
+                settings=settings,
+                store=store,
+                user=user,
             )
         )
 
@@ -373,7 +376,8 @@ def _drain_results() -> None:
 
 
 def _submit_one(
-    uploaded, *, category: str, submitted: set[str], settings: Settings, store: VectorStore
+    uploaded, *, category: str, submitted: set[str], settings: Settings,
+    store: VectorStore, user: User,
 ) -> tuple[str, str]:
     """处理单个上传文件，返回 (消息级别, 文案)。
 
@@ -393,15 +397,15 @@ def _submit_one(
             uploaded.name,
             uploaded.getvalue(),
             category=category,
-            is_public=True,
-            user_id=None,
+            is_public=False,
+            user_id=user.id,
             settings=settings,
         )
         enqueue_new(
             staged,
             category=category,
-            is_public=True,
-            user_id=None,
+            is_public=False,
+            user_id=user.id,
             store=store,
             settings=settings,
         )
@@ -412,9 +416,11 @@ def _submit_one(
     return "success", f"{uploaded.name} 已提交入库"
 
 
-def _render_progress(*, settings: Settings) -> None:
+def _render_progress(*, settings: Settings, user: User) -> None:
     """对未完成的入库任务轮询刷新进度条。"""
-    tasks, _ = list_tasks_by_user(None, page=1, page_size=50, db_path=settings.database_path)
+    tasks, _ = list_tasks_by_user(
+        user.id, page=1, page_size=50, db_path=settings.database_path
+    )
     abandoned: set[int] = st.session_state.setdefault(STATE_ABANDONED, set())
     active = [
         task
@@ -435,7 +441,7 @@ def _render_progress(*, settings: Settings) -> None:
     while time.monotonic() < deadline:
         time.sleep(POLL_INTERVAL_SECONDS)
         tasks, _ = list_tasks_by_user(
-            None, page=1, page_size=50, db_path=settings.database_path
+            user.id, page=1, page_size=50, db_path=settings.database_path
         )
         pending_left = False
         for task in tasks:
@@ -482,12 +488,12 @@ def _status_chip(document, task) -> str:
     return f'<span class="cqa-chip cqa-chip--wait">{label}{counts}</span>'
 
 
-def _render_list(*, settings: Settings, store: VectorStore) -> None:
-    """文档列表：分页、状态、失败原因、删除、重试。"""
+def _render_list(*, settings: Settings, store: VectorStore, user: User) -> None:
+    """文档列表：分页、状态、失败原因、删除、重试。只列当前用户自己的资料。"""
     page = int(st.session_state.get(STATE_PAGE, 1))
     page_size = settings.page_size
     rows, total = list_documents(
-        include_public=True, page=page, page_size=page_size, db_path=settings.database_path
+        user_id=user.id, page=page, page_size=page_size, db_path=settings.database_path
     )
     total_pages = max((total + page_size - 1) // page_size, 1)
 
@@ -510,7 +516,7 @@ def _render_list(*, settings: Settings, store: VectorStore) -> None:
     if not rows:
         st.markdown(
             '<div class="cqa-panel"><div class="cqa-empty">'
-            "还没有文档，上传学生手册或通知试试。</div></div>",
+            "还没有资料，上传一份讲义或通知试试。只有你本人能检索到。</div></div>",
             unsafe_allow_html=True,
         )
         return

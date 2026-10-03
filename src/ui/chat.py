@@ -6,11 +6,11 @@
 - docs/07-设计令牌.md §8.2（引用卡片用 `app-card`；分类过滤放页面顶部工具栏，DR-09）
 - docs/03-开发任务清单.md M2-05 / M2-07
 
-**当前身份说明**：认证在 M3-03 才到位，本页暂时以匿名身份运行——
-检索只覆盖公共文档（`user_id=None`），会话归属用内置占位 `-1`。
-个人资料检索与多会话列表分别在 M3 与 M2-06（FB-2.4）补齐。
+**身份说明**：FB-3.2 起本页在登录态下运行——会话归属当前用户，
+检索以当前用户的 `user_id` 过滤（公共文档 + 本人资料），反馈也记在本人名下。
+个人资料检索范围由用户上传的资料决定（见「我的文档」页）。
 
-纯逻辑函数（问题校验、导出 Markdown、相似度文案）不依赖 Streamlit，可直接单测。
+纯逻辑函数（问题校验、导出 Markdown、相似度文案、引用编号对齐）不依赖 Streamlit，可直接单测。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import logging
 import streamlit as st
 import streamlit.components.v1 as components
 
-from config.settings import PUBLIC_USER_ID, Settings, category_options
+from config.settings import Settings, category_options
 from src.rag.chain import stream_answer
 from src.rag.prompts import parse_source_numbers
 from src.repository import (
@@ -30,6 +30,7 @@ from src.repository import (
     RATING_USELESS,
     ROLE_ASSISTANT,
     ROLE_USER,
+    User,
     add_feedback,
     create_conversation,
     delete_conversation,
@@ -48,8 +49,6 @@ logger = logging.getLogger(__name__)
 MAX_QUESTION_LEN = 500
 # 会话标题取首问前 15 字（docs/06 §1.5 会话接口约定）
 TITLE_MAX_LEN = 15
-# 认证到位前，会话归属使用与公共文档一致的占位身份
-ANONYMOUS_OWNER_ID = PUBLIC_USER_ID
 
 STATE_CONVERSATION = "chat_conversation_id"
 STATE_CATEGORY = "chat_category"
@@ -138,9 +137,9 @@ def category_filter_options() -> list[tuple[str, str | None]]:
 # ==================== 页面渲染 ====================
 
 
-def render(*, settings: Settings, store: VectorStore) -> None:
+def render(*, settings: Settings, store: VectorStore, user: User) -> None:
     """渲染整个问答页。"""
-    conversation_id = _ensure_conversation(settings)
+    conversation_id = _ensure_conversation(settings, user)
 
     st.markdown('<div class="cqa-page-title">问答</div>', unsafe_allow_html=True)
     st.markdown(
@@ -158,7 +157,7 @@ def render(*, settings: Settings, store: VectorStore) -> None:
 
     category = _render_toolbar(settings=settings, messages=messages, sources=sources)
     _render_notice()
-    _render_history(messages, sources=sources, settings=settings)
+    _render_history(messages, sources=sources, settings=settings, user=user)
 
     question = st.chat_input("输入你的问题，例如：搬宿舍需要提前申请吗")
     if question is not None:
@@ -168,20 +167,25 @@ def render(*, settings: Settings, store: VectorStore) -> None:
             category=category,
             settings=settings,
             store=store,
+            user=user,
         )
 
     # 必须放在最后：本轮提问可能刚补上会话标题（_ensure_title），
     # 若在提问之前渲染列表，标题要等下一次 rerun 才刷新得过来
-    _render_conversation_list(settings=settings, conversation_id=conversation_id)
+    _render_conversation_list(settings=settings, conversation_id=conversation_id, user=user)
 
 
-def _ensure_conversation(settings: Settings) -> int:
-    """取当前会话；没有或已失效（例如被删）时新建一条并记住。"""
+def _ensure_conversation(settings: Settings, user: User) -> int:
+    """取当前会话；没有或已失效（例如被删、或换了登录账号）时新建一条。"""
     conversation_id = st.session_state.get(STATE_CONVERSATION)
-    if conversation_id is None or get_conversation(
-        conversation_id, db_path=settings.database_path
-    ) is None:
-        conversation_id = create_conversation(ANONYMOUS_OWNER_ID, db_path=settings.database_path)
+    conversation = (
+        get_conversation(conversation_id, db_path=settings.database_path)
+        if conversation_id is not None
+        else None
+    )
+    # 归属校验：换账号登录后，会话态若没被清掉，绝不能落进上一个人的会话
+    if conversation is None or conversation.user_id != user.id:
+        conversation_id = create_conversation(user.id, db_path=settings.database_path)
         st.session_state[STATE_CONVERSATION] = conversation_id
     return int(conversation_id)
 
@@ -195,8 +199,8 @@ def _ensure_title(conversation_id: int, question: str, *, settings: Settings) ->
         )
 
 
-def _render_conversation_list(*, settings: Settings, conversation_id: int) -> None:
-    """侧边栏会话列表：新建 / 切换 / 重命名 / 删除（FR-12）。
+def _render_conversation_list(*, settings: Settings, conversation_id: int, user: User) -> None:
+    """侧边栏会话列表：新建 / 切换 / 重命名 / 删除（FR-12）。只列当前用户自己的会话。
 
     设计说明（近似实现）：docs/05 PG-02 的「左侧会话列表」与 G-03 的共用导航栏，
     在 Streamlit 里合并到同一个侧边栏——它本身就是页面左侧。原型要求的
@@ -206,13 +210,11 @@ def _render_conversation_list(*, settings: Settings, conversation_id: int) -> No
         st.markdown('<div class="cqa-conv-head">会话</div>', unsafe_allow_html=True)
         if st.button("＋ 新建会话", key="conv-new", use_container_width=True):
             st.session_state[STATE_CONVERSATION] = create_conversation(
-                ANONYMOUS_OWNER_ID, db_path=settings.database_path
+                user.id, db_path=settings.database_path
             )
             st.rerun()
 
-        rows, _ = list_conversations(
-            ANONYMOUS_OWNER_ID, page_size=50, db_path=settings.database_path
-        )
+        rows, _ = list_conversations(user.id, page_size=50, db_path=settings.database_path)
         for row in rows:
             _render_conversation_row(row, current=conversation_id, settings=settings)
 
@@ -274,7 +276,9 @@ def _render_notice() -> None:
         st.warning(notice)
 
 
-def _render_history(messages, *, sources: dict[int, list[dict]], settings: Settings) -> None:
+def _render_history(
+    messages, *, sources: dict[int, list[dict]], settings: Settings, user: User
+) -> None:
     """渲染历史消息。刷新后从数据库重放，因此不会丢。"""
     if not messages:
         st.markdown(
@@ -296,6 +300,7 @@ def _render_history(messages, *, sources: dict[int, list[dict]], settings: Setti
                 content=message.content,
                 sources=rows,
                 settings=settings,
+                user=user,
             )
 
 
@@ -311,10 +316,10 @@ def _render_sources(content: str, sources: list[dict]) -> None:
 
 
 def _render_answer_actions(
-    *, message_id: int, content: str, sources: list[dict], settings: Settings
+    *, message_id: int, content: str, sources: list[dict], settings: Settings, user: User
 ) -> None:
     """反馈按钮（FR-18）与复制答案（FR-19）。"""
-    selected = get_feedback(message_id, ANONYMOUS_OWNER_ID, db_path=settings.database_path)
+    selected = get_feedback(message_id, user.id, db_path=settings.database_path)
 
     up_col, down_col, copy_col, _ = st.columns([1, 1, 1.4, 4.6])
     if up_col.button(
@@ -323,20 +328,20 @@ def _render_answer_actions(
         disabled=selected is not None,
         type="primary" if selected == RATING_USEFUL else "secondary",
     ):
-        _save_feedback(message_id, RATING_USEFUL, settings)
+        _save_feedback(message_id, RATING_USEFUL, settings, user)
     if down_col.button(
         "没用",
         key=f"fb-down-{message_id}",
         disabled=selected is not None,
         type="primary" if selected == RATING_USELESS else "secondary",
     ):
-        _save_feedback(message_id, RATING_USELESS, settings)
+        _save_feedback(message_id, RATING_USELESS, settings, user)
     with copy_col:
         _copy_button(answer_clipboard_text(content, sources), key=str(message_id))
 
 
-def _save_feedback(message_id: int, rating: str, settings: Settings) -> None:
-    add_feedback(message_id, ANONYMOUS_OWNER_ID, rating, db_path=settings.database_path)
+def _save_feedback(message_id: int, rating: str, settings: Settings, user: User) -> None:
+    add_feedback(message_id, user.id, rating, db_path=settings.database_path)
     st.rerun()
 
 
@@ -396,6 +401,7 @@ def _handle_submit(
     category: str | None,
     settings: Settings,
     store: VectorStore,
+    user: User,
 ) -> None:
     """处理一次提问：校验 → 上屏用户消息 → 流式输出 → 引用卡片 → 操作行。
 
@@ -419,7 +425,7 @@ def _handle_submit(
         )
         turn = stream_answer(
             question,
-            None,
+            user.id,
             conversation_id,
             category=category,
             store=store,
@@ -447,4 +453,5 @@ def _handle_submit(
             content=message.content,
             sources=rows,
             settings=settings,
+            user=user,
         )

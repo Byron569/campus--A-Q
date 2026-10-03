@@ -116,23 +116,28 @@ def test_sidebar_width_matches_design_rail() -> None:
 
 
 def test_sidebar_nav_uses_shared_rail_styles() -> None:
-    """docs/07 §6 / §8.2：侧边栏用 --sidebar 配色，选中项用 --sidebar-accent 语义。
+    """docs/07 §6 / §8.2：侧边栏用 --sidebar 配色。
 
-    选择器统一带 [data-testid="stSidebar"] 前缀，才能压过 Streamlit 对 <a> 的全局样式。
+    导航已由 `<a>` 改为 Streamlit 按钮（链接跳转会重建会话、丢掉登录态），
+    因此不再有 .cqa-nav-item 这类自有导航样式，改为直接约束按钮外观。
     """
     css = theme.stylesheet()
 
     for selector in (
-        ".cqa-rail", ".cqa-brand", ".cqa-nav-item", ".cqa-nav-item.is-active",
-        ".cqa-nav-icon", ".cqa-navlabel", ".cqa-railfoot",
+        ".cqa-brand", ".cqa-brandmark", ".cqa-brandname", ".cqa-branddesc", ".cqa-railfoot",
     ):
         assert f'[data-testid="stSidebar"] {selector}' in css
-    # 选中项要换背景并加粗，图标换主色
-    assert "font-weight: 600" in _rule(css, '[data-testid="stSidebar"] .cqa-nav-item.is-active')
-    assert "var(--primary)" in _rule(css, '[data-testid="stSidebar"] .cqa-nav-item.is-active .cqa-nav-icon')
+
+    # 旧的链接式导航样式必须清干净，避免残留死代码
+    assert ".cqa-nav-item" not in css
+    assert ".cqa-nav-icon" not in css
+
+    button_rule = _rule(css, '[data-testid="stSidebar"] .stButton > button')
+    assert "justify-content: flex-start" in button_rule
+    assert "var(--radius-control)" in button_rule
     # 导航项也必须保留键盘焦点（DR-13）
     assert "outline: 2px solid var(--ring)" in _rule(
-        css, '[data-testid="stSidebar"] .cqa-nav-item:focus-visible'
+        css, '[data-testid="stSidebar"] .stButton > button:focus-visible'
     )
 
 

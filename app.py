@@ -5,11 +5,15 @@
 - docs/05-产品原型与交互说明.md §G-03（侧边栏为 PG-02~PG-06 共用）、§G-04（刷新保持当前页）
 - docs/07-设计令牌.md §7（导航图标映射）
 
-当前可用：「问答」页（M2-05，默认落地）与「我的文档」页（M1-18）；
-管理员 / 设置 / 关于分别在 M3-04 / M3-16 / M3-17 实现，这里先渲染占位页，
-把导航框架立起来。
-登录态守卫（G-01）与角色守卫（G-02，`user` 不显示管理员入口）依赖 M3 的认证模块，
-届时在 `main()` 里加判断。
+当前可用：「问答」（M2-05）、「我的文档」（M1-18）、「设置」（M3-16）、「关于」（M3-17）；
+「管理员」页在 M3-04（FB-3.3）实现，先渲染占位页，把导航框架立起来。
+
+登录态与守卫（FB-3.2）：
+- `G-01 访客拦截`：未登录一律只渲染登录页，任何页面内容都不产出
+- `G-02 角色守卫`：非 admin 访问管理员页 → 就地提示并回到问答页
+- `G-03 侧边栏`：`user` 角色不显示「管理员」入口
+账号被删除或被禁用时，已建立的登录态**立即失效**（下次交互即被踢回登录页），
+否则禁用操作要等用户重新登录才生效。
 
 **为什么用查询参数记当前页**：G-04 要求「刷新页面保持当前页」，而
 `st.session_state` 在浏览器刷新后会重置，只有 URL 里的查询参数能跨刷新存活。
@@ -26,44 +30,32 @@ import logging
 import streamlit as st
 
 from config.settings import get_settings, load_kb_config
+from src.auth import service
 from src.ingest.tasks import recover_stale_tasks
+from src.repository import User, get_user
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import about, chat, documents, theme
+from src.ui import about, chat, documents, login, theme
+from src.ui import settings as ui_settings
 
 logger = logging.getLogger(__name__)
 
 QUERY_KEY = "page"
 
-# lucide 图标路径（docs/07 §7 的映射表）。路径原样取自
-# docs/design/doubao/assets/icons/，内联在代码里避免运行期依赖 docs/ 目录。
-_SVG_ATTRS = (
-    'class="cqa-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"'
-)
-_ICONS = {
-    "qa": '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168'
-          'l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/>'
-          '<path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
-    "documents": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706'
-                 'l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>'
-                 '<path d="M14 2v5a1 1 0 0 0 1 1h5"/>',
-    "admin": '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>'
-             '<circle cx="12" cy="7" r="4"/>',
-    "settings": '<path d="M13 21h8"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174'
-                'a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32'
-                'a2 2 0 0 0 .83-.497z"/>',
-    "about": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>'
-             '<path d="M12 17h.01"/>',
-}
-
-# 导航项。plan 为空表示本期已实现；否则写明计划在哪个里程碑交付。
+# 导航项。icon 用 Streamlit 的 Material 图标语法。
+# 设计原指定 lucide 图标（docs/07 §7），但导航已改为按钮实现（见下），
+# Streamlit 按钮只接受 Material 图标，这处差异已登记在自审清单。
 PAGES = (
-    {"key": "qa", "label": "问答", "plan": ""},
-    {"key": "documents", "label": "我的文档", "plan": ""},
-    {"key": "admin", "label": "管理员", "plan": "公共文档与用户管理（docs/03 M3-04）"},
-    {"key": "settings", "label": "设置", "plan": "修改显示名与密码、注销账号（docs/03 M3-16）"},
-    {"key": "about", "label": "关于", "plan": ""},
+    {"key": "qa", "label": "问答", "icon": ":material/forum:", "plan": ""},
+    {"key": "documents", "label": "我的文档", "icon": ":material/description:", "plan": ""},
+    {
+        "key": "admin",
+        "label": "管理员",
+        "icon": ":material/manage_accounts:",
+        "plan": "公共文档与用户管理（docs/03 M3-04）",
+    },
+    {"key": "settings", "label": "设置", "icon": ":material/settings:", "plan": ""},
+    {"key": "about", "label": "关于", "icon": ":material/info:", "plan": ""},
 )
 PAGES_BY_KEY = {page["key"]: page for page in PAGES}
 # G-04：登录成功默认落地问答页；无登录态时同样从问答页开始
@@ -97,34 +89,72 @@ def resolve_page(raw: str | None) -> str:
     return raw if raw in PAGES_BY_KEY else DEFAULT_PAGE
 
 
-def render_sidebar(current: str) -> None:
-    """渲染左侧导航。用 <a href="?page=xxx"> 而不是按钮：
+def current_user(*, settings) -> User | None:
+    """取当前登录用户；无登录态或账号已失效时返回 None。
 
-    一是 G-04 要求刷新后保持当前页，锚点天然把状态写进 URL；
-    二是只有自定义 HTML 才能用上设计指定的 lucide 图标（docs/07 §7）。
+    账号被删除或被禁用时**立即失效**：否则管理员刚禁用一个人，
+    那个人的浏览器还处在已登录状态，要等他重新登录才被拦住。
+    """
+    user_id = st.session_state.get(login.STATE_USER_ID)
+    if user_id is None:
+        return None
+
+    user = get_user(user_id, db_path=settings.database_path)
+    if user is None or not user.is_active:
+        st.session_state.pop(login.STATE_USER_ID, None)
+        return None
+    return user
+
+
+def goto_page(page_key: str) -> None:
+    """切换页面：只改查询参数并重跑，**绝不整页跳转**。
+
+    为什么不用 `<a href="?page=x">`：链接跳转会重新加载整个页面、重建 Streamlit
+    会话，而登录态正存在会话里——点一下导航就被踢回登录页（FB-3.2 浏览器验收
+    实测到的缺陷）。按钮走的是 WebSocket 事件，不重载页面，会话与登录态都不动。
+
+    仍然写查询参数，是为了满足 G-04「刷新后保持当前页」：重新登录后会落回原页。
+    """
+    st.query_params[QUERY_KEY] = page_key
+    st.rerun()
+
+
+def render_sidebar(current: str, *, user: User) -> None:
+    """渲染左侧导航与账号区。
+
+    G-03：`user` 角色不显示「管理员」入口。侧边栏顺序为
+    品牌 → 导航按钮 → 当前账号 → 退出登录 →（问答页的会话列表由 chat 追加）。
     """
     school = load_kb_config()["school"]["name"]
-    # target="_self"：Streamlit 给 markdown 里的 <a> 自动加了 target="_blank"，
-    # 不加这个属性每次点导航都会新开一个标签页
-    items = "".join(
-        f'<a class="cqa-nav-item{" is-active" if page["key"] == current else ""}" '
-        f'target="_self" href="?{QUERY_KEY}={page["key"]}">'
-        f'<svg {_SVG_ATTRS}>{_ICONS[page["key"]]}</svg>'
-        f'<span class="cqa-navlabel">{html.escape(page["label"])}</span></a>'
-        for page in PAGES
-    )
+    pages = [page for page in PAGES if page["key"] != "admin" or user.is_admin]
+    account = html.escape(user.display_name or user.username)
+    role = "管理员" if user.is_admin else "学生"
 
     with st.sidebar:
         st.markdown(
-            f'<div class="cqa-rail">'
             f'<div class="cqa-brand"><div class="cqa-brandmark">校</div>'
             f"<div><div class=\"cqa-brandname\">校答</div>"
-            f'<div class="cqa-branddesc">{html.escape(str(school))}</div></div></div>'
-            f'<nav class="cqa-nav">{items}</nav>'
-            f'<div class="cqa-railfoot">未登录 · 账号体系在 M3 开放</div>'
-            f"</div>",
+            f'<div class="cqa-branddesc">{html.escape(str(school))}</div></div></div>',
             unsafe_allow_html=True,
         )
+
+        for page in pages:
+            if st.button(
+                page["label"],
+                key=f"nav-{page['key']}",
+                icon=page["icon"],
+                use_container_width=True,
+                type="primary" if page["key"] == current else "secondary",
+            ):
+                goto_page(page["key"])
+
+        st.markdown(
+            f'<div class="cqa-railfoot">{account} · {role}</div>', unsafe_allow_html=True
+        )
+        if st.button(
+            "退出登录", key="logout", icon=":material/logout:", use_container_width=True
+        ):
+            login.logout()
 
 
 def render_placeholder(page: dict) -> None:
@@ -164,14 +194,27 @@ def main() -> None:
 
     bootstrap()
 
-    current = resolve_page(st.query_params.get(QUERY_KEY))
-    render_sidebar(current)
-
     settings = get_settings()
+    user = current_user(settings=settings)
+    if user is None:
+        # G-01 访客拦截：未登录只渲染登录页，不产出任何页面内容
+        login.render(settings=settings)
+        return
+
+    current = resolve_page(st.query_params.get(QUERY_KEY))
+    if not service.can_access_page(user, current):
+        # G-02 角色守卫：拦截后就地提示，并回到问答页
+        st.warning("无权访问该页面")
+        current = DEFAULT_PAGE
+
+    render_sidebar(current, user=user)
+
     if current == "qa":
-        chat.render(settings=settings, store=get_vector_store())
+        chat.render(settings=settings, store=get_vector_store(), user=user)
     elif current == "documents":
-        documents.render(settings=settings, store=get_vector_store())
+        documents.render(settings=settings, store=get_vector_store(), user=user)
+    elif current == "settings":
+        ui_settings.render(settings=settings, user=user)
     elif current == "about":
         about.render(settings=settings)
     else:

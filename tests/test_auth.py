@@ -13,6 +13,7 @@ import pytest
 from src.auth.security import hash_password, validate_password, verify_password
 from src.auth.service import (
     INVALID_CREDENTIALS_TEXT,
+    can_access_page,
     change_display_name,
     change_password,
     login,
@@ -183,6 +184,33 @@ def test_require_admin_rejects_normal_user(db: Path) -> None:
 def test_require_admin_rejects_anonymous() -> None:
     with pytest.raises(PermissionDenied):
         require_admin(None)
+
+
+# ==================== 页面访问判定（G-01 / G-02）====================
+
+
+def test_can_access_page_denies_anonymous() -> None:
+    """G-01 访客拦截：未登录任何页面都不可访问。"""
+    assert can_access_page(None, "qa") is False
+    assert can_access_page(None, "about") is False
+
+
+def test_can_access_page_allows_normal_pages_for_user(db: Path) -> None:
+    user = new_user(db)
+
+    assert can_access_page(user, "qa") is True
+    assert can_access_page(user, "documents") is True
+    assert can_access_page(user, "settings") is True
+    assert can_access_page(user, "about") is True
+
+
+def test_can_access_page_blocks_admin_page_for_normal_user(db: Path) -> None:
+    """G-02 角色守卫：user 访问管理员页被拦截。"""
+    assert can_access_page(new_user(db), "admin") is False
+
+
+def test_can_access_page_allows_admin_page_for_admin(db: Path) -> None:
+    assert can_access_page(new_admin(db), "admin") is True
 
 
 # ==================== TC-U19：修改密码 ====================
