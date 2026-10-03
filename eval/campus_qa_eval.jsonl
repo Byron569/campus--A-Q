@@ -1,0 +1,30 @@
+{"id": "q01", "type": "answerable", "question": "新生什么时候在哪里报到？", "expected_sources": ["新生报到须知.md"], "expected_keywords": ["9月1日", "体育馆"]}
+{"id": "q02", "type": "answerable", "question": "报到需要带哪些材料？", "expected_sources": ["新生报到须知.md"], "expected_keywords": ["录取通知书", "身份证"]}
+{"id": "q03", "type": "answerable", "question": "学费和住宿费怎么缴纳？", "expected_sources": ["新生报到须知.md"], "expected_keywords": ["支付平台"]}
+{"id": "q04", "type": "answerable", "question": "不能按期到校报到该怎么办？", "expected_sources": ["新生报到须知.md"], "expected_keywords": ["请假"]}
+{"id": "q05", "type": "answerable", "question": "宿舍楼几点关门？", "expected_sources": ["宿舍管理规定.txt"], "expected_keywords": ["23:00"]}
+{"id": "q06", "type": "answerable", "question": "宿舍里能使用多大功率的电器？", "expected_sources": ["宿舍管理规定.txt"], "expected_keywords": ["800"]}
+{"id": "q07", "type": "answerable", "question": "亲友来学校可以留宿宿舍吗？", "expected_sources": ["宿舍管理规定.txt"], "expected_keywords": ["报备", "不得留宿"]}
+{"id": "q08", "type": "answerable", "question": "宿舍卫生什么时候检查？", "expected_sources": ["宿舍管理规定.txt"], "expected_keywords": ["周三"]}
+{"id": "q09", "type": "answerable", "question": "搬宿舍需要提前几天申请？", "expected_sources": ["宿舍搬迁通知.docx"], "expected_keywords": ["三个工作日"]}
+{"id": "q10", "type": "answerable", "question": "宿舍搬迁的流程是什么？", "expected_sources": ["宿舍搬迁通知.docx"], "expected_keywords": ["申请单", "核验"]}
+{"id": "q11", "type": "answerable", "question": "校园卡丢了怎么办？", "expected_sources": ["校园卡使用说明.md"], "expected_keywords": ["挂失"]}
+{"id": "q12", "type": "answerable", "question": "校园卡在哪里补办，要多少钱？", "expected_sources": ["校园卡使用说明.md"], "expected_keywords": ["行政楼", "20元"]}
+{"id": "q13", "type": "answerable", "question": "校园卡的初始密码是什么？", "expected_sources": ["校园卡使用说明.md"], "expected_keywords": ["身份证号码后六位"]}
+{"id": "q14", "type": "answerable", "question": "本科生一次能借几本书？", "expected_sources": ["图书馆借阅规则.md"], "expected_keywords": ["10册"]}
+{"id": "q15", "type": "answerable", "question": "图书能借多久，可以续借几次？", "expected_sources": ["图书馆借阅规则.md"], "expected_keywords": ["30天", "2次"]}
+{"id": "q16", "type": "answerable", "question": "图书还晚了要交多少钱？", "expected_sources": ["图书馆借阅规则.md"], "expected_keywords": ["0.1元"]}
+{"id": "q17", "type": "answerable", "question": "国家奖学金一年多少钱？", "expected_sources": ["奖学金评定细则.txt"], "expected_keywords": ["8000"]}
+{"id": "q18", "type": "answerable", "question": "校级学业奖学金分几等，各是多少钱？", "expected_sources": ["奖学金评定细则.txt"], "expected_keywords": ["3000", "2000", "1000"]}
+{"id": "q19", "type": "answerable", "question": "请假超过三天由谁审批？", "expected_sources": ["请假与考勤管理办法.docx"], "expected_keywords": ["学院分管领导"]}
+{"id": "q20", "type": "answerable", "question": "请假期满后需要销假吗？", "expected_sources": ["请假与考勤管理办法.docx"], "expected_keywords": ["销假"]}
+{"id": "r01", "type": "unanswerable", "question": "比特币今天的价格是多少？"}
+{"id": "r02", "type": "unanswerable", "question": "月球上能不能种土豆？"}
+{"id": "r03", "type": "unanswerable", "question": "企鹅的迁徙路线是怎样的？"}
+{"id": "r04", "type": "unanswerable", "question": "如何给手机更换电池？"}
+{"id": "r05", "type": "unanswerable", "question": "世界杯决赛在哪个城市举行？"}
+{"id": "m01", "type": "multi_turn", "turns": [{"question": "图书馆的开放时间是什么？", "expected_sources": ["图书馆借阅规则.md"], "expected_keywords": ["8:00", "22:00"]}, {"question": "那本科生一次能借几本？", "expected_sources": ["图书馆借阅规则.md"], "expected_keywords": ["10册"]}]}
+{"id": "m02", "type": "multi_turn", "turns": [{"question": "宿舍搬迁需要走哪些流程？", "expected_sources": ["宿舍搬迁通知.docx"], "expected_keywords": ["申请单"]}, {"question": "要提前几天申请？", "expected_sources": ["宿舍搬迁通知.docx"], "expected_keywords": ["三个工作日"]}]}
+{"id": "m03", "type": "multi_turn", "turns": [{"question": "国家奖学金的标准是多少？", "expected_sources": ["奖学金评定细则.txt"], "expected_keywords": ["8000"]}, {"question": "它和国家励志奖学金可以同时获得吗？", "expected_sources": ["奖学金评定细则.txt"], "expected_keywords": ["不可兼得"]}]}
+{"id": "m04", "type": "multi_turn", "turns": [{"question": "校园卡丢了怎么办？", "expected_sources": ["校园卡使用说明.md"], "expected_keywords": ["挂失"]}, {"question": "补办要多少钱？", "expected_sources": ["校园卡使用说明.md"], "expected_keywords": ["20元"]}]}
+{"id": "m05", "type": "multi_turn", "turns": [{"question": "请假需要提交什么材料？", "expected_sources": ["请假与考勤管理办法.docx"], "expected_keywords": ["诊断证明"]}, {"question": "超过三天由谁审批？", "expected_sources": ["请假与考勤管理办法.docx"], "expected_keywords": ["学院分管领导"]}]}
