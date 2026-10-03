@@ -94,6 +94,27 @@ def test_cards_and_panels_do_not_use_box_shadow() -> None:
     assert "var(--shadow-dialog)" in _rule(theme.OVERRIDES, '[data-testid="stPopoverBody"]')
 
 
+def test_sidebar_nav_uses_shared_rail_styles() -> None:
+    """docs/07 §6 / §8.2：侧边栏用 --sidebar 配色，选中项用 --sidebar-accent 语义。
+
+    选择器统一带 [data-testid="stSidebar"] 前缀，才能压过 Streamlit 对 <a> 的全局样式。
+    """
+    css = theme.stylesheet()
+
+    for selector in (
+        ".cqa-rail", ".cqa-brand", ".cqa-nav-item", ".cqa-nav-item.is-active",
+        ".cqa-nav-icon", ".cqa-navlabel", ".cqa-railfoot",
+    ):
+        assert f'[data-testid="stSidebar"] {selector}' in css
+    # 选中项要换背景并加粗，图标换主色
+    assert "font-weight: 600" in _rule(css, '[data-testid="stSidebar"] .cqa-nav-item.is-active')
+    assert "var(--primary)" in _rule(css, '[data-testid="stSidebar"] .cqa-nav-item.is-active .cqa-nav-icon')
+    # 导航项也必须保留键盘焦点（DR-13）
+    assert "outline: 2px solid var(--ring)" in _rule(
+        css, '[data-testid="stSidebar"] .cqa-nav-item:focus-visible'
+    )
+
+
 def test_upload_size_limit_leaves_room_for_business_check() -> None:
     """DR-03：Streamlit 的上传上限要比业务上限（20MB）宽。
 

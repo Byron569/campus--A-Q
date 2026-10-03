@@ -298,7 +298,7 @@ def _panel_head(title: str, subtitle: str = "") -> None:
 
 def render(*, settings: Settings, store: VectorStore) -> None:
     """渲染整个文档管理页。"""
-    st.markdown('<div class="cqa-page-title">文档管理</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cqa-page-title">我的文档</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="cqa-page-desc">当前版本尚未提供登录（认证在 M3），'
         "本页上传的文件按公共文档入库，所有用户均可检索到。</div>",

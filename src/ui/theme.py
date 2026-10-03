@@ -364,6 +364,63 @@ COMPONENTS = """
   padding: var(--space-8) var(--space-4);
   text-align: center; color: var(--muted-foreground); font-size: 13px;
 }
+
+/* 侧边栏导航（对应模板 sidebar-nav 的 .rail / .nav / .item / .footer）
+   选择器统一带 [data-testid="stSidebar"] 前缀，压过 Streamlit 对 <a> 的全局样式 */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0 !important; }
+[data-testid="stSidebar"] [data-testid="stElementContainer"] { padding: 0 !important; }
+[data-testid="stSidebar"] a,
+[data-testid="stSidebar"] a:hover,
+[data-testid="stSidebar"] a:visited { text-decoration: none !important; }
+
+[data-testid="stSidebar"] .cqa-rail {
+  display: flex; flex-direction: column;
+  padding: var(--space-2) var(--space-1) var(--space-8);
+}
+[data-testid="stSidebar"] .cqa-brand {
+  display: flex; align-items: center; gap: 10px; padding: 10px 11px 14px;
+}
+[data-testid="stSidebar"] .cqa-brandmark {
+  width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+  border-radius: 9px;
+  font: 600 14px/1 var(--font-sans); color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--chart-1), var(--chart-4));
+}
+[data-testid="stSidebar"] .cqa-brandname { font-size: 14px; font-weight: 600; }
+[data-testid="stSidebar"] .cqa-branddesc {
+  font-size: 12px; color: var(--muted-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-testid="stSidebar"] .cqa-nav { display: flex; flex-direction: column; gap: 2px; }
+[data-testid="stSidebar"] .cqa-nav-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 11px; border-radius: var(--radius-control);
+  color: var(--sidebar-foreground); font-size: 14px; font-weight: 400;
+  transition: background .14s, color .14s;
+}
+[data-testid="stSidebar"] .cqa-nav-item:hover {
+  background: color-mix(in srgb, var(--background) 64%, var(--sidebar));
+  color: var(--foreground);
+}
+[data-testid="stSidebar"] .cqa-nav-item.is-active {
+  background: var(--background); color: var(--foreground); font-weight: 600;
+}
+[data-testid="stSidebar"] .cqa-nav-item:focus-visible {
+  outline: 2px solid var(--ring) !important; outline-offset: 2px;
+}
+[data-testid="stSidebar"] .cqa-nav-icon {
+  width: 18px; height: 18px; flex: none;
+  color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
+}
+[data-testid="stSidebar"] .cqa-nav-item.is-active .cqa-nav-icon { color: var(--primary); }
+[data-testid="stSidebar"] .cqa-navlabel {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-testid="stSidebar"] .cqa-railfoot {
+  margin-top: var(--space-3); padding: 10px 11px;
+  border-top: 1px solid var(--sidebar-border);
+  font-size: 12px; color: var(--muted-foreground);
+}
 """
 
 
