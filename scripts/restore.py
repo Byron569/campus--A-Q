@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import zipfile
 from pathlib import Path
 
 # 直接以 `python scripts/xxx.py` 运行时，sys.path[0] 是 scripts/ 而非项目根
@@ -42,6 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = build_parser().parse_args(argv)
+
+    # 预检放在建 VectorStore 之前：本地 BGE 加载要数秒，备份文件本身就有问题
+    # 时不该白加载一遍模型
+    if not Path(args.zip_path).exists():
+        print(f"恢复失败：备份文件不存在：{args.zip_path}")
+        return 1
+    if not zipfile.is_zipfile(args.zip_path):
+        print(f"恢复失败：备份文件已损坏或不是 zip：{args.zip_path}")
+        return 1
 
     settings = get_settings()
     reindex = not args.no_reindex
