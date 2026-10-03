@@ -148,6 +148,102 @@ def _to_task(row) -> IngestTask:
     )
 
 
+# ==================== users ====================
+#
+# 注意区分命名：上面的 `ROLE_USER` / `ROLE_ASSISTANT` 是**消息角色**（messages.role），
+# 这里的是**账号角色**（users.role）与账号状态（users.status）。
+
+USER_ROLE_ADMIN = "admin"
+USER_ROLE_USER = "user"
+USER_STATUS_ACTIVE = "active"
+USER_STATUS_DISABLED = "disabled"
+
+
+@dataclass
+class User:
+    id: int
+    username: str
+    password_hash: str
+    display_name: str
+    role: str
+    status: str
+    created_at: str
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == USER_ROLE_ADMIN
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == USER_STATUS_ACTIVE
+
+
+def _to_user(row) -> User:
+    return User(
+        id=row["id"],
+        username=row["username"],
+        password_hash=row["password_hash"],
+        display_name=row["display_name"] or "",
+        role=row["role"],
+        status=row["status"],
+        created_at=row["created_at"],
+    )
+
+
+@retry_on_write_lock
+def create_user(
+    *,
+    username: str,
+    password_hash: str,
+    display_name: str | None = None,
+    role: str = USER_ROLE_USER,
+    db_path: PathLike = None,
+) -> int:
+    """创建账号，返回 user_id。用户名重复时由 UNIQUE 约束抛 IntegrityError。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO users (username, password_hash, display_name, role)
+            VALUES (?, ?, ?, ?)
+            """,
+            (username, password_hash, (display_name or "").strip() or username, role),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_user(user_id: int, db_path: PathLike = None) -> User | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _to_user(row) if row else None
+
+
+def get_user_by_name(username: str, db_path: PathLike = None) -> User | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    return _to_user(row) if row else None
+
+
+@retry_on_write_lock
+def update_password(user_id: int, password_hash: str, db_path: PathLike = None) -> bool:
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id)
+        )
+        return cursor.rowcount > 0
+
+
+@retry_on_write_lock
+def update_display_name(user_id: int, display_name: str, db_path: PathLike = None) -> bool:
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET display_name = ? WHERE id = ?",
+            ((display_name or "").strip(), user_id),
+        )
+        return cursor.rowcount > 0
+
+
 # ==================== documents ====================
 
 

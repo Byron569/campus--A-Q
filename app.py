@@ -29,7 +29,7 @@ from config.settings import get_settings, load_kb_config
 from src.ingest.tasks import recover_stale_tasks
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import chat, documents, theme
+from src.ui import about, chat, documents, theme
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ PAGES = (
     {"key": "documents", "label": "我的文档", "plan": ""},
     {"key": "admin", "label": "管理员", "plan": "公共文档与用户管理（docs/03 M3-04）"},
     {"key": "settings", "label": "设置", "plan": "修改显示名与密码、注销账号（docs/03 M3-16）"},
-    {"key": "about", "label": "关于", "plan": "数据使用说明与学校联系方式（docs/03 M3-17）"},
+    {"key": "about", "label": "关于", "plan": ""},
 )
 PAGES_BY_KEY = {page["key"]: page for page in PAGES}
 # G-04：登录成功默认落地问答页；无登录态时同样从问答页开始
@@ -172,6 +172,8 @@ def main() -> None:
         chat.render(settings=settings, store=get_vector_store())
     elif current == "documents":
         documents.render(settings=settings, store=get_vector_store())
+    elif current == "about":
+        about.render(settings=settings)
     else:
         render_placeholder(PAGES_BY_KEY[current])
 

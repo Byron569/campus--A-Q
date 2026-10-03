@@ -40,8 +40,25 @@ class PermissionFilterError(CampusQAError):
     """
 
 
-class AccountDisabled(CampusQAError):
+class AuthError(CampusQAError):
+    """认证或注册校验失败（用户名密码错误、协议未勾选、两次密码不一致等）。
+
+    文案直接面向用户，就地显示在表单字段下方（docs/05 §G-06）。
+    设计文档的接口文档未单列本异常，与 `src/errors.py` 的创建理由相同：
+    认证失败需要被 UI 层统一捕获，集中定义可避免各处重复判断。
+    """
+
+
+class AccountDisabled(AuthError):
     """被禁用的账号尝试登录。对应 docs/02 §11：提示「账号已被禁用」。"""
+
+
+class UsernameTaken(AuthError):
+    """注册时用户名已被占用（FR-01：用户名唯一）。"""
+
+
+class PermissionDenied(CampusQAError):
+    """角色不足（如 user 访问管理员页）。对应 docs/05 §G-02：提示「无权访问该页面」。"""
 
 
 class LLMUnavailable(CampusQAError):
