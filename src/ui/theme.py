@@ -437,6 +437,54 @@ COMPONENTS = """
   border-top: 1px solid var(--sidebar-border);
   font-size: 12px; color: var(--muted-foreground);
 }
+
+/* ---------- 问答页（PG-02）---------- */
+
+/* 检索 / 生成过程中的就地提示 */
+.cqa-hint {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: var(--space-2) 0;
+  font-size: 13px; color: var(--muted-foreground);
+}
+.cqa-hint::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--info);
+}
+
+/* 聊天气泡：1px 描边 + 14px 圆角 + 无阴影（模板无阴影设计 A-04）。
+   注意用 stChatMessage 的公开 testid，不用随版本变化的 emotion 类名。
+   文档已知差异（docs/07 §8.4）：Streamlit 的 chat_message 一律靠左，不做左右分栏，
+   这里沿用其默认布局，用头像区分角色。 */
+[data-testid="stChatMessage"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: none;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p:last-child { margin-bottom: 0; }
+
+/* 引用来源卡片：--accent 高亮 + 虚线边框（docs/07 §8.2 app-card）。
+   用 st.expander 承载「展开原文」，其 testid 是长期稳定的公开选择器；
+   万一失效只会退回默认外观，不影响功能。 */
+[data-testid="stExpander"] {
+  border: 1px dashed color-mix(in srgb, var(--primary) 34%, var(--border)) !important;
+  border-radius: var(--radius-control) !important;
+  background: color-mix(in srgb, var(--accent) 42%, var(--card)) !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+[data-testid="stExpander"] summary { font-size: 13px !important; font-weight: 500; padding: 8px 12px !important; }
+[data-testid="stExpander"] summary:hover {
+  background: color-mix(in srgb, var(--accent) 66%, var(--card)) !important;
+}
+[data-testid="stExpander"] summary:focus-visible { outline: 2px solid var(--ring) !important; outline-offset: -2px; }
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding: 0 12px 10px !important; }
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] p { font-size: 13px; }
+
+/* 答案操作行（反馈 / 复制）与下载按钮的紧凑间距 */
+.cqa-answer-actions { margin-top: var(--space-1); }
 """
 
 

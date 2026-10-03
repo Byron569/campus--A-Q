@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from app import DEFAULT_PAGE, PAGES, PAGES_BY_KEY, _ICONS, resolve_page
 
+# 截至 M2 已实现的页面：问答（M2-05）与我的文档（M1-18）
+IMPLEMENTED_PAGES = {"qa", "documents"}
+
 
 def test_navigation_has_the_five_designed_entries() -> None:
     """docs/05 §G-03：导航为 PG-02~PG-06 五页共用，顺序与原型一致。"""
@@ -30,12 +33,16 @@ def test_every_nav_entry_has_its_lucide_icon() -> None:
 def test_unimplemented_pages_declare_their_milestone() -> None:
     """未实现的页面必须写明计划里程碑，不能留空页骗点击。"""
     for page in PAGES:
-        if page["key"] != DEFAULT_PAGE:
+        if page["key"] in IMPLEMENTED_PAGES:
+            assert page["plan"] == "", f"{page['label']} 已实现，不应再写计划里程碑"
+        else:
             assert page["plan"], f"{page['label']} 未标注里程碑"
 
 
-def test_default_page_is_the_only_implemented_one() -> None:
-    assert DEFAULT_PAGE == "documents"
+def test_default_page_is_qa_after_m2() -> None:
+    """G-04：进入系统默认落地问答页，且该页已实现。"""
+    assert DEFAULT_PAGE == "qa"
+    assert DEFAULT_PAGE in IMPLEMENTED_PAGES
     assert PAGES_BY_KEY[DEFAULT_PAGE]["plan"] == ""
 
 

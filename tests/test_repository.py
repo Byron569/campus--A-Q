@@ -12,12 +12,15 @@ import pytest
 
 from src.repository import (
     DOC_DELETED,
+    RATING_USEFUL,
+    RATING_USELESS,
     ROLE_ASSISTANT,
     ROLE_USER,
     TASK_DONE,
     TASK_FAILED,
     TASK_PENDING,
     TASK_RUNNING,
+    add_feedback,
     add_message,
     add_metric,
     add_sources,
@@ -27,6 +30,7 @@ from src.repository import (
     exists_active_task,
     get_conversation,
     get_document,
+    get_feedback,
     get_task,
     get_task_by_doc,
     list_documents,
@@ -425,3 +429,39 @@ def test_add_metric_marks_refusal_and_degradation(db: Path) -> None:
 
     assert [row["answerable"] for row in rows] == [0, 1]
     assert [row["degraded"] for row in rows] == [0, 1]
+
+
+# ==================== feedback ====================
+
+
+def test_add_feedback_then_read_back(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "答案", db_path=db)
+
+    assert get_feedback(message_id, 1, db_path=db) is None
+    assert add_feedback(message_id, 1, RATING_USEFUL, db_path=db) is True
+    assert get_feedback(message_id, 1, db_path=db) == RATING_USEFUL
+
+
+def test_second_feedback_from_same_user_is_ignored(db: Path) -> None:
+    """FR-18：同一用户对同一回答只能记一次，重复提交不覆盖也不报错。"""
+    conversation_id = create_conversation(1, db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "答案", db_path=db)
+    add_feedback(message_id, 1, RATING_USEFUL, db_path=db)
+
+    assert add_feedback(message_id, 1, RATING_USELESS, db_path=db) is False
+    assert get_feedback(message_id, 1, db_path=db) == RATING_USEFUL
+
+
+def test_feedback_is_per_user(db: Path) -> None:
+    conversation_id = create_conversation(1, db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "答案", db_path=db)
+
+    add_feedback(message_id, 1, RATING_USEFUL, db_path=db)
+    add_feedback(message_id, 2, RATING_USELESS, db_path=db)
+
+    with get_conn(db) as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()["n"]
+
+    assert total == 2
+    assert get_feedback(message_id, 2, db_path=db) == RATING_USELESS

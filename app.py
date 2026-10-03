@@ -5,8 +5,9 @@
 - docs/05-产品原型与交互说明.md §G-03（侧边栏为 PG-02~PG-06 共用）、§G-04（刷新保持当前页）
 - docs/07-设计令牌.md §7（导航图标映射）
 
-当前只有「我的文档」页可用（M1-18）；问答 / 管理员 / 设置 / 关于分别在
-M2-05 / M3-04 / M3-16 / M3-17 实现，这里先渲染占位页，把导航框架立起来。
+当前可用：「问答」页（M2-05，默认落地）与「我的文档」页（M1-18）；
+管理员 / 设置 / 关于分别在 M3-04 / M3-16 / M3-17 实现，这里先渲染占位页，
+把导航框架立起来。
 登录态守卫（G-01）与角色守卫（G-02，`user` 不显示管理员入口）依赖 M3 的认证模块，
 届时在 `main()` 里加判断。
 
@@ -28,7 +29,7 @@ from config.settings import get_settings, load_kb_config
 from src.ingest.tasks import recover_stale_tasks
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import documents, theme
+from src.ui import chat, documents, theme
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +59,15 @@ _ICONS = {
 
 # 导航项。plan 为空表示本期已实现；否则写明计划在哪个里程碑交付。
 PAGES = (
-    {"key": "qa", "label": "问答", "plan": "多轮问答、流式输出与引用溯源（docs/03 M2-05）"},
+    {"key": "qa", "label": "问答", "plan": ""},
     {"key": "documents", "label": "我的文档", "plan": ""},
     {"key": "admin", "label": "管理员", "plan": "公共文档与用户管理（docs/03 M3-04）"},
     {"key": "settings", "label": "设置", "plan": "修改显示名与密码、注销账号（docs/03 M3-16）"},
     {"key": "about", "label": "关于", "plan": "数据使用说明与学校联系方式（docs/03 M3-17）"},
 )
 PAGES_BY_KEY = {page["key"]: page for page in PAGES}
-DEFAULT_PAGE = "documents"
+# G-04：登录成功默认落地问答页；无登录态时同样从问答页开始
+DEFAULT_PAGE = "qa"
 
 
 @st.cache_resource
@@ -130,7 +132,7 @@ def render_placeholder(page: dict) -> None:
     st.markdown(
         f'<div class="cqa-page-title">{html.escape(page["label"])}</div>'
         f'<div class="cqa-page-desc">该页面尚未实现，计划在 {html.escape(page["plan"])}。'
-        "当前可用的只有「我的文档」。</div>",
+        "当前可用的是「问答」与「我的文档」。</div>",
         unsafe_allow_html=True,
     )
 
@@ -164,8 +166,11 @@ def main() -> None:
     current = resolve_page(st.query_params.get(QUERY_KEY))
     render_sidebar(current)
 
-    if current == DEFAULT_PAGE:
-        documents.render(settings=get_settings(), store=get_vector_store())
+    settings = get_settings()
+    if current == "qa":
+        chat.render(settings=settings, store=get_vector_store())
+    elif current == "documents":
+        documents.render(settings=settings, store=get_vector_store())
     else:
         render_placeholder(PAGES_BY_KEY[current])
 

@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
 
+RATING_USEFUL = "useful"
+RATING_USELESS = "useless"
+
 DOC_ACTIVE = "active"
 DOC_DELETED = "deleted"
 
@@ -490,6 +493,35 @@ def list_sources_by_message(message_id: int, db_path: PathLike = None) -> list[d
             (message_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ==================== feedback ====================
+
+
+def add_feedback(
+    message_id: int, user_id: int, rating: str, db_path: PathLike = None
+) -> bool:
+    """写一条反馈。
+
+    表上有 `UNIQUE (message_id, user_id)`：同一用户对同一回答只记一次，
+    重复提交被忽略并返回 False，界面据此把按钮置为不可重复点击（FR-18）。
+    """
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO feedback (message_id, user_id, rating) VALUES (?, ?, ?)",
+            (message_id, user_id, rating),
+        )
+        return cursor.rowcount > 0
+
+
+def get_feedback(message_id: int, user_id: int, db_path: PathLike = None) -> str | None:
+    """取该用户对该回答的反馈，用于回显已选态。"""
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT rating FROM feedback WHERE message_id = ? AND user_id = ?",
+            (message_id, user_id),
+        ).fetchone()
+    return row["rating"] if row else None
 
 
 def add_metric(

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -86,8 +87,12 @@ def _rule(css: str, selector: str) -> str:
 
 def test_cards_and_panels_do_not_use_box_shadow() -> None:
     """A-04：模板为「边框分隔、不用阴影」，只有弹窗允许一层轻阴影（D-02）。"""
-    # 自有面板 / 列表行 / 状态胶囊一律无阴影
-    assert "box-shadow" not in theme.COMPONENTS
+    # 自有面板 / 列表行 / 状态胶囊一律无阴影。
+    # 允许出现 `box-shadow: none`——那是**显式取消** Streamlit 自带阴影的写法，
+    # 恰恰是合规的；禁止的是任何带实际值的阴影。
+    shadows = re.findall(r"box-shadow:\s*([^;]+);", theme.COMPONENTS)
+    assert shadows, "聊天/引用卡片需要显式取消 Streamlit 自带阴影"
+    assert all(value.strip().startswith("none") for value in shadows), shadows
     # Streamlit 提示条自带的阴影必须显式取消，否则破调性
     assert "box-shadow: none" in _rule(theme.OVERRIDES, '[data-testid="stAlert"]')
     # 唯一允许的阴影在二次确认弹窗上

@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from config.settings import Settings
-from src.rag.chain import DEGRADE_NOTICE, AnswerResult, answer
+from src.rag.chain import DEGRADE_NOTICE, AnswerResult, answer, stream_answer
 from src.rag.prompts import build_refusal_text
 from src.rag.retriever import build_retriever
 from src.repository import (
@@ -37,6 +37,24 @@ class StubLLM:
         if self.exc is not None:
             raise self.exc
         return SimpleNamespace(content=self.responses.pop(0) if self.responses else "")
+
+
+class StreamLLM:
+    """按块流式返回；`exc_after` 指定在第几块之前抛错，用于验证流中途降级。"""
+
+    def __init__(self, chunks: list[str], exc_after: int | None = None) -> None:
+        self.chunks = list(chunks)
+        self.exc_after = exc_after
+        self.calls: list[object] = []
+
+    def stream(self, messages):
+        self.calls.append(messages)
+        for index, chunk in enumerate(self.chunks):
+            if self.exc_after is not None and index >= self.exc_after:
+                raise RuntimeError("connection reset")
+            yield SimpleNamespace(content=chunk)
+        if self.exc_after is not None and self.exc_after >= len(self.chunks):
+            raise RuntimeError("connection reset")
 
 
 class SpyRetriever:
@@ -275,3 +293,120 @@ def test_history_is_passed_to_rewrite_and_messages_accumulate(
     # 两轮 = 4 条（用户 + 助手 × 2），历史随轮次累积
     assert [m.role for m in messages] == [ROLE_USER, "assistant", ROLE_USER, "assistant"]
     assert messages[0].content == "第一问"
+
+
+# ==================== 流式输出（M2-05 + DR-11）====================
+
+
+def test_stream_fills_result_only_after_consumption(settings: Settings, db: Path) -> None:
+    conversation = new_conversation(db)
+    turn = stream_answer(
+        "搬宿舍要提前几天",
+        1,
+        conversation,
+        retriever=SpyRetriever([make_hit()]),
+        llm=StreamLLM(["搬迁", "需提前三个工作日【来源1】。"]),
+        settings=settings,
+        db_path=db,
+    )
+
+    assert turn.result is None  # 还没消费，结果未生成
+
+    streamed = "".join(turn.tokens)
+
+    assert turn.result is not None
+    assert streamed == turn.result.text
+    assert [hit.doc_id for hit in turn.result.sources] == [1]
+    # 流式路径也落库
+    assert len(list_messages(conversation, db_path=db)) == 2
+
+
+def test_stream_strips_out_of_range_citation_split_across_chunks(
+    settings: Settings, db: Path
+) -> None:
+    """越界编号被拆成多块时也要被剔除，且界面文本与落库文本一致（DR-11）。"""
+    conversation = new_conversation(db)
+    llm = StreamLLM(
+        ["搬迁需", "提前三个工作日【来源1】。", "另有说法【来源", "9】。"]
+    )
+
+    turn = stream_answer(
+        "搬宿舍要提前几天",
+        1,
+        conversation,
+        retriever=SpyRetriever([make_hit()]),
+        llm=llm,
+        settings=settings,
+        db_path=db,
+    )
+    streamed = "".join(turn.tokens)
+
+    assert "【来源1】" in streamed
+    assert "【来源9】" not in streamed
+    assert streamed == turn.result.text
+    assert [hit.doc_id for hit in turn.result.sources] == [1]
+
+    saved = list_sources_by_message(list_messages(conversation, db_path=db)[1].id, db_path=db)
+    assert len(saved) == 1  # 越界编号没有写进 message_sources
+
+
+def test_stream_degrades_midway_and_keeps_partial_output(
+    settings: Settings, db: Path
+) -> None:
+    hits = [make_hit(doc_id=7)]
+    conversation = new_conversation(db)
+
+    turn = stream_answer(
+        "搬宿舍要提前几天",
+        1,
+        conversation,
+        retriever=SpyRetriever(hits),
+        llm=StreamLLM(["已经输出的半句"], exc_after=1),
+        settings=settings,
+        db_path=db,
+    )
+    streamed = "".join(turn.tokens)
+
+    assert streamed.startswith("已经输出的半句")
+    assert DEGRADE_NOTICE in streamed
+    assert turn.result.degraded is True
+    assert [hit.doc_id for hit in turn.result.sources] == [7]
+
+
+def test_stream_degrades_before_any_output(settings: Settings, db: Path) -> None:
+    hits = [make_hit(doc_id=7)]
+    conversation = new_conversation(db)
+
+    turn = stream_answer(
+        "搬宿舍要提前几天",
+        1,
+        conversation,
+        retriever=SpyRetriever(hits),
+        llm=StreamLLM([], exc_after=0),
+        settings=settings,
+        db_path=db,
+    )
+    streamed = "".join(turn.tokens)
+
+    assert streamed.startswith(DEGRADE_NOTICE)
+    assert hits[0].text in streamed
+    assert turn.result.degraded is True
+
+
+def test_stream_refusal_path(store: VectorStore, settings: Settings, db: Path) -> None:
+    conversation = new_conversation(db)
+
+    turn = stream_answer(
+        "完全不相关的问题",
+        1,
+        conversation,
+        retriever=build_retriever(1, store=store, settings=settings),
+        llm=StreamLLM(["不该被使用"]),
+        settings=settings,
+        db_path=db,
+    )
+    streamed = "".join(turn.tokens)
+
+    assert streamed == build_refusal_text()
+    assert turn.result.refused is True
+    assert turn.result.sources == []
