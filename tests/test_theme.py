@@ -115,6 +115,30 @@ def test_sidebar_width_matches_design_rail() -> None:
     assert "stSidebar\"][aria-expanded=\"false\"]" not in css
 
 
+def test_narrow_viewport_sidebar_does_not_cover_main() -> None:
+    """窄屏（481–900px）展开侧栏时，主内容要右移**并同比收窄**。
+
+    浏览器实测的缺陷：主内容 `stMain` 是 `position:absolute; left:0; right:0` 满宽，
+    不随侧栏右移，左边 248px 被压在侧栏下面；只加 margin-left 又会让整块推出视口，
+    必须同时收窄。
+    """
+    css = theme.stylesheet()
+
+    assert "@media (min-width: 481px) and (max-width: 900px)" in css
+    assert ':has([data-testid="stSidebar"][aria-expanded="true"])' in css
+    assert "margin-left: 248px !important" in css
+    assert "width: calc(100% - 248px) !important" in css
+
+
+def test_narrow_viewport_keeps_collapse_button_visible() -> None:
+    """触屏没有 hover：窄屏下收起按钮必须常显，否则侧栏展开后关不掉。"""
+    css = theme.stylesheet()
+
+    assert "@media (max-width: 900px)" in css
+    assert '[data-testid="stSidebarCollapseButton"]' in css
+    assert "visibility: visible !important" in css
+
+
 def test_sidebar_nav_uses_shared_rail_styles() -> None:
     """docs/07 §6 / §8.2：侧边栏用 --sidebar 配色。
 

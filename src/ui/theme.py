@@ -304,6 +304,49 @@ hr, [data-testid="stDivider"] { border-color: var(--border) !important; }
    当前 Streamlit 版本该 testid 已不存在，带边框的容器就是 stVerticalBlock 本身，
    边框写在随版本变化的 emotion 类上。页面因此不使用 st.container(border=True)，
    改用自有 .cqa-row 画边框，避免依赖内部类名。 */
+
+/* ---------- 窄屏侧栏：不再遮挡主内容（浏览器实测的缺陷） ----------
+   实测（604px 视口）：侧栏展开时 `stSidebar` 占左侧 248px、z-index 极高，
+   而主内容 `stMain` 是 `position:absolute; left:0; right:0` 满宽、**不随侧栏右移**，
+   于是左边 248px 的内容被压在侧栏下面且没有任何遮罩提示。分两档处理：
+
+   - 小窗口 / 平板（481–900px）：把主内容整体右移一个侧栏宽度，二者并排，互不遮挡；
+   - 手机（≤480px）：保持「抽屉浮层」这一手机通用形态（此时并排只剩一两百像素，
+     反而不可用），只把抽屉宽度收到不超过 82vw，留出一条可点击的内容带。
+
+   之所以用 `:has()`：Streamlit 未提供「侧栏是否展开」的稳定类名，只能按
+   `aria-expanded` 反查父容器（Chrome 105+ / Safari 15.4+ / Firefox 121+ 支持）。 */
+@media (min-width: 481px) and (max-width: 900px) {
+  [data-testid="stSidebar"][aria-expanded="true"] {
+    width: 248px !important;
+    min-width: 248px !important;
+    max-width: 248px !important;
+  }
+  /* 主内容既要右移、也要同比收窄：只加 margin-left 会把整块推到视口外
+     （实测主内容 width 仍为视口宽度，右边界超出 248px，出现横向溢出）。 */
+  [data-testid="stAppViewContainer"]:has([data-testid="stSidebar"][aria-expanded="true"])
+    [data-testid="stMain"] {
+    margin-left: 248px !important;
+    width: calc(100% - 248px) !important;
+    max-width: calc(100% - 248px) !important;
+  }
+}
+@media (max-width: 480px) {
+  [data-testid="stSidebar"][aria-expanded="true"] {
+    width: min(248px, 82vw) !important;
+    min-width: min(248px, 82vw) !important;
+    max-width: min(248px, 82vw) !important;
+  }
+}
+@media (max-width: 900px) {
+  /* 收起按钮默认靠 :hover 显形，而触屏没有 hover——手机上侧栏一旦展开就关不掉。
+     窄屏下让它常显（浏览器实测该 testid 为稳定公开选择器）。 */
+  [data-testid="stSidebarCollapseButton"],
+  [data-testid="stSidebarCollapseButton"] button {
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
 """
 
 # ---------------------------------------------------------------------------
