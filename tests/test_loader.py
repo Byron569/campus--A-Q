@@ -193,6 +193,36 @@ def test_load_docx_deduplicates_merged_table_cells(tmp_path: Path) -> None:
     assert "学分 | 3 | 必修" in text
 
 
+def make_ordered_docx(tmp_path: Path, name: str = "ordered.docx") -> Path:
+    """标题 → 表格 → 下一节，用来验证表格没有被搬到文末。"""
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph("二、审批权限")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "请假天数"
+    table.cell(0, 1).text = "审批人"
+    table.cell(1, 0).text = "超过 3 天"
+    table.cell(1, 1).text = "学院分管领导审批"
+    document.add_paragraph("三、销假")
+    document.add_paragraph("请假期满后应于 1 个工作日内销假。")
+    target = tmp_path / name
+    document.save(str(target))
+    return target
+
+
+def test_load_docx_keeps_tables_in_document_order(tmp_path: Path) -> None:
+    """表格必须留在它所属的标题下，不能被搬到文末粘到最后一节（FB-3.5 暴露）。
+
+    搬走后「二、审批权限」下空无一物，检索命中标题却取不到表格内容。
+    """
+    text = load_document(make_ordered_docx(tmp_path)).sections[0].text
+
+    assert text.index("二、审批权限") < text.index("请假天数")
+    assert text.index("请假天数") < text.index("三、销假")
+    assert "超过 3 天 | 学院分管领导审批" in text
+
+
 # ---------------- 异常分支 ----------------
 
 

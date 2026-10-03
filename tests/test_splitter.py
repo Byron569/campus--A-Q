@@ -69,6 +69,35 @@ def test_chunks_do_not_split_heading_from_body() -> None:
     assert "提前三个工作日" in chunks[0].text
 
 
+def test_numbered_list_stays_with_its_heading() -> None:
+    """数字清单不能被当成标题，把标题与清单拆成两块（FB-3.5 评测暴露）。
+
+    拆散后检索命中「## 二、需携带材料」这一标题切片，却取不到清单内容，
+    模型只能拒答。
+    """
+    text = (
+        "## 二、需携带材料\n\n"
+        "1. 录取通知书原件\n2. 本人身份证原件及复印件 2 份\n3. 一寸免冠照片 4 张"
+    )
+
+    blocks = split_structural(text)
+
+    assert len(blocks) == 1
+    assert "需携带材料" in blocks[0]
+    assert "录取通知书" in blocks[0]
+
+
+def test_single_line_numbered_heading_still_starts_a_section() -> None:
+    """单行的数字标题仍要开新块，不能因为列表修复就把它降级成正文。"""
+    text = "前言内容。\n\n1、课程安排\n\n本学期共 6 次作业。"
+
+    blocks = split_structural(text)
+
+    assert len(blocks) == 2
+    assert blocks[1].startswith("1、课程安排")
+    assert "6 次作业" in blocks[1]
+
+
 # ---------------- TC-U02：超长文本被递归切分且不超上限 ----------------
 
 

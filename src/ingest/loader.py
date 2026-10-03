@@ -142,6 +142,22 @@ def _load_pdf(path: Path) -> LoadResult:
     return result
 
 
+def _docx_table_text(table) -> str:
+    """把一个表格转成文本，每行以「 | 」拼接。"""
+    rows: list[str] = []
+    for row in table.rows:
+        # 横向合并的单元格会被 python-docx 重复返回（同一 cell 出现多次），
+        # 不做去重会把一个值刷成 "值 | 值 | 值"，切片又脏又浪费 token
+        cells: list[str] = []
+        for cell in row.cells:
+            value = cell.text.strip()
+            if value and (not cells or cells[-1] != value):
+                cells.append(value)
+        if cells:
+            rows.append(" | ".join(cells))
+    return "\n".join(rows)
+
+
 def _load_docx(path: Path) -> LoadResult:
     try:
         import docx
@@ -153,23 +169,28 @@ def _load_docx(path: Path) -> LoadResult:
     except Exception as exc:
         raise ParseError(f"DOCX 解析失败：{path.name}（{exc}）") from exc
 
-    parts: list[str] = [p.text for p in document.paragraphs]
+    # 表格也是正文的一部分。校园通知里大量信息（时间表、办理流程、审批权限）
+    # 以表格承载，若只取段落会静默丢内容，故一并抽取（设计文档未明确，已登记）。
+    #
+    # 必须按 body 子元素顺序还原：python-docx 把 paragraphs 与 tables 分成两个列表，
+    # 「先全部段落、再全部表格」会把表格搬到文末、粘到最后一节，标题（如「二、审批权限」）
+    # 下空无一物，检索命中标题却取不到表格内容（FB-3.5 评测实测：q19 因此答不出）。
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
 
-    # 表格也是正文的一部分。校园通知里大量信息（时间表、办理流程）以表格承载，
-    # 若只取段落会静默丢内容，故一并抽取（设计文档未明确，已在自审清单登记）。
-    for table in document.tables:
-        for row in table.rows:
-            # 横向合并的单元格会被 python-docx 重复返回（同一 cell 出现多次），
-            # 不做去重会把一个值刷成 "值 | 值 | 值"，切片又脏又浪费 token
-            cells: list[str] = []
-            for cell in row.cells:
-                value = cell.text.strip()
-                if value and (not cells or cells[-1] != value):
-                    cells.append(value)
-            if cells:
-                parts.append(" | ".join(cells))
+    parts: list[str] = []
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            text = Paragraph(child, document).text
+            if text and text.strip():
+                parts.append(text)
+        elif child.tag == qn("w:tbl"):
+            table_text = _docx_table_text(Table(child, document))
+            if table_text:
+                parts.append(table_text)
 
-    text = clean_text("\n\n".join(part for part in parts if part and part.strip()))
+    text = clean_text("\n\n".join(parts))
     # python-docx 无法可靠还原分页，page 统一为 None
     sections = [RawSection(text=text)] if text else []
     return LoadResult(sections=sections)

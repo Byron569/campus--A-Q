@@ -32,6 +32,9 @@ _HEADING_PATTERNS = (
     re.compile(r"^[（(]\d+[)）]"),                                   # (1)
 )
 
+# 数字编号既可能是章节标题，也可能是列表项，需要按段落而非单行判断
+_NUMBERED = re.compile(r"^\d+[、.．]")
+
 
 @dataclass
 class Chunk:
@@ -47,6 +50,23 @@ def is_heading(line: str) -> bool:
     if not candidate or len(candidate) > MAX_HEADING_LENGTH:
         return False
     return any(pattern.match(candidate) for pattern in _HEADING_PATTERNS)
+
+
+def starts_new_section(paragraph: str) -> bool:
+    """判断一个段落是否开启新的结构块。
+
+    数字编号要分两种身份：章节标题（「3. 校园卡办理」，单行）与列表项
+    （「1. 录取通知书原件」，同段里连续多行）。只有**单行**的数字段落才按标题处理，
+    否则「## 二、需携带材料」与紧随其后的清单会被拆成两块，检索命中标题却取不到内容
+    （FB-3.5 评测实测：q02 / q19 因此答不出）。
+    """
+    lines = paragraph.splitlines()
+    if not lines:
+        return False
+    head = lines[0].strip()
+    if _NUMBERED.match(head):
+        return len(lines) == 1 and is_heading(head)
+    return is_heading(head)
 
 
 def split_structural(text: str, max_block_size: int = MAX_BLOCK_SIZE) -> list[str]:
@@ -71,10 +91,9 @@ def split_structural(text: str, max_block_size: int = MAX_BLOCK_SIZE) -> list[st
     size = 0
 
     for paragraph in paragraphs:
-        lines = paragraph.splitlines()
-        starts_new_section = is_heading(lines[0]) if lines else False
+        starts_new = starts_new_section(paragraph)
 
-        if buffer and (starts_new_section or size + len(paragraph) > max_block_size):
+        if buffer and (starts_new or size + len(paragraph) > max_block_size):
             blocks.append("\n\n".join(buffer))
             buffer, size = [], 0
 
