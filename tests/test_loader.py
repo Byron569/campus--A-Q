@@ -64,7 +64,23 @@ def make_docx(tmp_path: Path, name: str = "handbook.docx") -> Path:
 
 def test_clean_text_trims_and_collapses_blank_lines() -> None:
     raw = "  第一章   \n\n\n\n   第一条 规定。   \n   \n"
-    assert clean_text(raw) == "第一章\n\n第一条 规定。"
+    # 中文字符之间的空格也被一并去掉（见下一条用例）
+    assert clean_text(raw) == "第一章\n\n第一条规定。"
+
+
+def test_clean_text_removes_spaces_between_cjk() -> None:
+    """真实资料实证：Word 分散对齐与 PDF 转换会在中文字符间塞空格。
+
+    这类空格会破坏 BM25 的 jieba 分词召回，必须清掉。
+    """
+    raw = "《编 译 原 理》 实 验 指 导 书\n\n前 言\n\n实 验 一　词 法 分 析"
+    assert clean_text(raw) == "《编译原理》实验指导书\n\n前言\n\n实验一词法分析"
+
+
+def test_clean_text_keeps_spaces_between_non_cjk() -> None:
+    """英文、数字之间以及中英之间的空格必须保留，否则会把词粘在一起。"""
+    raw = "安装 Python 3.12 与 Node.js 20，参见 Appendix A"
+    assert clean_text(raw) == raw
 
 
 def test_clean_text_on_empty_input() -> None:
@@ -142,11 +158,39 @@ def test_load_docx_paragraphs_and_tables(tmp_path: Path) -> None:
 
     assert not result.is_empty
     text = result.sections[0].text
-    assert "第二章 宿舍搬迁" in text
+    # 标题里的中文空格已被清洗掉（原文档写作「第二章 宿舍搬迁」）
+    assert "第二章宿舍搬迁" in text
     assert "提前三个工作日提交申请" in text
     # 表格内容不能丢：校园通知大量信息以表格承载
     assert "报到时间" in text
     assert "九月一日至九月二日" in text
+
+
+def make_merged_cell_docx(tmp_path: Path, name: str = "merged.docx") -> Path:
+    """横向合并的单元格：python-docx 会把同一个 cell 在 row.cells 里返回多次。"""
+    import docx
+
+    document = docx.Document()
+    table = document.add_table(rows=2, cols=3)
+    table.cell(0, 0).text = "课程名称"
+    table.cell(0, 1).merge(table.cell(0, 2))
+    table.cell(0, 1).text = "《编译原理》"
+    table.cell(1, 0).text = "学分"
+    table.cell(1, 1).text = "3"
+    table.cell(1, 2).text = "必修"
+    target = tmp_path / name
+    document.save(str(target))
+    return target
+
+
+def test_load_docx_deduplicates_merged_table_cells(tmp_path: Path) -> None:
+    """合并单元格的重复值必须去重，否则一个值会被刷成「值 | 值 | 值」。"""
+    text = load_document(make_merged_cell_docx(tmp_path)).sections[0].text
+
+    assert "课程名称 | 《编译原理》" in text
+    assert "《编译原理》 | 《编译原理》" not in text
+    # 正常行不受影响
+    assert "学分 | 3 | 必修" in text
 
 
 # ---------------- 异常分支 ----------------

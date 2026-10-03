@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from config.settings import ALLOWED_SUFFIXES, OCR_CHAR_THRESHOLD_PER_PAGE
 from src.errors import ParseError, UnsupportedFileType
 
 logger = logging.getLogger(__name__)
+
+# 中文（含中文标点）之间不该有空格，但 Word 的分散对齐、PDF 转换都会塞进来。
+# 中文本来就不用空格分词，留着会破坏 BM25 的 jieba 分词召回，切片文字也很难看。
+# 只清理「两侧都是中日韩字符或中文标点」的空白，因此英文单词之间、数字之间、
+# 以及中英之间的空格（如 "Python 语言"、"第 3 章"）都不受影响。
+_CJK = r"[\u3000-\u303f\u4e00-\u9fff\uff01-\uff60]"
+_CJK_GAP = re.compile(rf"(?<={_CJK})[ \t\u00a0\u3000]+(?={_CJK})")
 
 
 @dataclass
@@ -46,7 +54,7 @@ class LoadResult:
 
 
 def clean_text(text: str) -> str:
-    """清洗：去行首尾空白，连续空行压缩为一个。"""
+    """清洗：去行首尾空白、连续空行压缩为一个、去掉中文字符之间的空白。"""
     lines: list[str] = []
     blank_run = 0
 
@@ -60,7 +68,7 @@ def clean_text(text: str) -> str:
             blank_run = 0
         lines.append(line)
 
-    return "\n".join(lines).strip()
+    return _CJK_GAP.sub("", "\n".join(lines).strip())
 
 
 def _read_text_file(path: Path) -> str:
@@ -151,8 +159,14 @@ def _load_docx(path: Path) -> LoadResult:
     # 若只取段落会静默丢内容，故一并抽取（设计文档未明确，已在自审清单登记）。
     for table in document.tables:
         for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            if any(cells):
+            # 横向合并的单元格会被 python-docx 重复返回（同一 cell 出现多次），
+            # 不做去重会把一个值刷成 "值 | 值 | 值"，切片又脏又浪费 token
+            cells: list[str] = []
+            for cell in row.cells:
+                value = cell.text.strip()
+                if value and (not cells or cells[-1] != value):
+                    cells.append(value)
+            if cells:
                 parts.append(" | ".join(cells))
 
     text = clean_text("\n\n".join(part for part in parts if part and part.strip()))
