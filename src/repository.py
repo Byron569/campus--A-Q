@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
@@ -908,3 +909,169 @@ def _insert_rows(conn, table: str, rows: list[dict]) -> None:
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
         [tuple(row.get(column) for column in columns) for row in rows],
     )
+
+
+# ==================== 管理员五维统计（FR-17，二期）====================
+#
+# 全部为只读聚合，不加重试装饰器（WAL 下读不会被写锁阻塞，见 db.retry_on_write_lock）。
+# 时间口径统一用 SQLite 的本地时间函数，与各表 created_at 的写入方式一致。
+
+
+@dataclass
+class UserStats:
+    total: int
+    active_today: int
+    disabled: int
+
+
+@dataclass
+class DocumentStats:
+    total: int
+    public: int
+    personal: int
+    failed_tasks: int
+
+    @property
+    def public_ratio(self) -> float:
+        return self.public / self.total if self.total else 0.0
+
+
+@dataclass
+class QualityStats:
+    total: int
+    refused: int
+    degraded: int
+    avg_latency_ms: float
+
+    @property
+    def refusal_rate(self) -> float:
+        return self.refused / self.total if self.total else 0.0
+
+
+@dataclass
+class WorstAnswer:
+    message_id: int
+    content: str
+    useless: int
+    rated: int
+
+
+def stats_users(db_path: PathLike = None) -> UserStats:
+    """用户维度：总数、今日活跃人数、被禁用人数。
+
+    今日活跃按「今天产生过消息的用户数」统计（`qa_metrics` 脱敏无 user_id，
+    只能从会话链路取）。
+    """
+    with get_conn(db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        disabled = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE status = ?", (USER_STATUS_DISABLED,)
+        ).fetchone()["n"]
+        active_today = conn.execute(
+            """
+            SELECT COUNT(DISTINCT c.user_id) AS n
+              FROM messages m
+              JOIN conversations c ON c.id = m.conversation_id
+             WHERE date(m.created_at) = date('now','localtime')
+            """
+        ).fetchone()["n"]
+    return UserStats(total=int(total), active_today=int(active_today), disabled=int(disabled))
+
+
+def stats_documents(db_path: PathLike = None) -> DocumentStats:
+    """文档维度：总数（不含已删除）、公共 / 个人数量、入库失败任务数。"""
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(is_public = 1) AS public,
+                   SUM(is_public = 0) AS personal
+              FROM documents
+             WHERE status != ?
+            """,
+            (DOC_DELETED,),
+        ).fetchone()
+        failed = conn.execute(
+            "SELECT COUNT(*) AS n FROM ingest_tasks WHERE status = ?", (TASK_FAILED,)
+        ).fetchone()["n"]
+    return DocumentStats(
+        total=int(row["total"] or 0),
+        public=int(row["public"] or 0),
+        personal=int(row["personal"] or 0),
+        failed_tasks=int(failed),
+    )
+
+
+def stats_quality(db_path: PathLike = None) -> QualityStats:
+    """质量维度：拒答率、降级次数、平均耗时（来自脱敏的 `qa_metrics`）。"""
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(answerable = 0) AS refused,
+                   SUM(degraded = 1) AS degraded,
+                   AVG(latency_ms) AS avg_ms
+              FROM qa_metrics
+            """
+        ).fetchone()
+    return QualityStats(
+        total=int(row["total"] or 0),
+        refused=int(row["refused"] or 0),
+        degraded=int(row["degraded"] or 0),
+        avg_latency_ms=float(row["avg_ms"] or 0.0),
+    )
+
+
+def stats_qa_volume(days: int = 30, db_path: PathLike = None) -> list[tuple[str, int]]:
+    """问答量维度：近 `days` 天按天聚合的问答次数，无数据的日期补 0。
+
+    返回按日期升序的 `[(YYYY-MM-DD, 次数)]`，直接喂给图表，避免前端再补洞。
+    """
+    days = max(int(days), 1)
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT date(created_at) AS day, COUNT(*) AS n
+              FROM qa_metrics
+             WHERE date(created_at) >= date('now', 'localtime', ?)
+             GROUP BY day
+            """,
+            (f"-{days - 1} days",),
+        ).fetchall()
+    counts = {row["day"]: int(row["n"]) for row in rows}
+
+    today = datetime.now().date()
+    return [
+        (day, counts.get(day, 0))
+        for day in (
+            (today - timedelta(days=offset)).isoformat() for offset in range(days - 1, -1, -1)
+        )
+    ]
+
+
+def stats_worst_answers(limit: int = 5, db_path: PathLike = None) -> list[WorstAnswer]:
+    """差评榜：被点「没用」最多的回答 Top-N（`feedback` 关联 `messages`）。"""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT m.id AS message_id, m.content AS content,
+                   SUM(f.rating = ?) AS useless,
+                   COUNT(f.id) AS rated
+              FROM feedback f
+              JOIN messages m ON m.id = f.message_id
+             GROUP BY m.id
+            HAVING useless > 0
+             ORDER BY useless DESC, m.id DESC
+             LIMIT ?
+            """,
+            (RATING_USELESS, limit),
+        ).fetchall()
+    return [
+        WorstAnswer(
+            message_id=int(row["message_id"]),
+            content=row["content"] or "",
+            useless=int(row["useless"] or 0),
+            rated=int(row["rated"] or 0),
+        )
+        for row in rows
+    ]

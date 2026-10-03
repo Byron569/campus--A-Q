@@ -1,12 +1,12 @@
-"""管理员页（PG-04 / FR-15、FR-16）。
+"""管理员页（PG-04 / FR-15、FR-16、FR-17）。
 
 设计依据：
 - docs/05-产品原型与交互说明.md §PG-04（公共文档 / 用户管理两个页签）
-- docs/01-需求规格说明书.md FR-15（公共文档管理）、FR-16（用户管理）
-- docs/02-架构设计.md §4.10（公共文档必须指定分类）、§4.9（删除的跨库清理）
+- docs/01-需求规格说明书.md FR-15（公共文档管理）、FR-16（用户管理）、FR-17（五维统计）
+- docs/02-架构设计.md §4.10（公共文档必须指定分类）、§4.9（删除的跨库清理）、§6.4（五维统计）
 
-范围：一期的管理员页只有「公共文档」与「用户管理」两块，
-五维统计（FR-17）已由客户裁决移出本期，页面不出现统计区。
+范围：三个页签——公共文档、用户管理、统计。
+五维统计（FR-17）为二期实现，指标口径见 docs/02 §6.4，聚合全部由 `repository` 完成。
 
 上传与删除直接复用「我的文档」页那套已测过的函数（`stage_upload` / `enqueue_new`
 / `delete_document`），区别只在 `is_public=True`、`user_id=None`（公共文档在
@@ -32,6 +32,11 @@ from src.repository import (
     list_documents,
     list_users,
     set_user_status,
+    stats_documents,
+    stats_qa_volume,
+    stats_quality,
+    stats_users,
+    stats_worst_answers,
 )
 from src.store.chroma import VectorStore
 from src.ui.documents import delete_document, enqueue_new, stage_upload, validate_upload
@@ -42,6 +47,10 @@ STATE_USER_KEYWORD = "admin_user_keyword"
 STATE_RESULTS = "admin_results"
 STATE_SUBMITTED = "admin_submitted"
 
+VOLUME_DAYS = 30
+WORST_LIMIT = 5
+SNIPPET_LENGTH = 60
+
 
 def render(*, settings: Settings, store: VectorStore, user: User) -> None:
     """渲染管理员页。角色守卫在 app.py 已做，这里再兜一次（纵深防御）。"""
@@ -50,16 +59,18 @@ def render(*, settings: Settings, store: VectorStore, user: User) -> None:
     st.markdown('<div class="cqa-page-title">管理员</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="cqa-page-desc">公共文档对所有登录用户可检索；'
-        "用户管理可禁用、启用或删除账号。</div>",
+        "用户管理可禁用、启用或删除账号；统计展示知识库与问答的整体情况。</div>",
         unsafe_allow_html=True,
     )
 
     _drain_notice()
-    public_tab, users_tab = st.tabs(["公共文档", "用户管理"])
+    public_tab, users_tab, stats_tab = st.tabs(["公共文档", "用户管理", "统计"])
     with public_tab:
         _render_public_tab(settings=settings, store=store)
     with users_tab:
         _render_users_tab(settings=settings, store=store, current=user)
+    with stats_tab:
+        _render_stats_tab(settings=settings)
     _drain_results()
 
 
@@ -338,6 +349,109 @@ def _render_user_row(
                 else:
                     st.session_state[STATE_RESULTS] = [("success", f"已删除 {target.username}")]
                     st.rerun()
+
+
+# ==================== 统计（FR-17，二期）====================
+
+
+def _render_stats_tab(*, settings: Settings) -> None:
+    """五维统计：用户 / 文档 / 问答量 / 质量 / 差评榜（口径见 docs/02 §6.4）。"""
+    db = settings.database_path
+    users = stats_users(db)
+    documents = stats_documents(db)
+    quality = stats_quality(db)
+    volume = stats_qa_volume(VOLUME_DAYS, db)
+
+    _stats_heading("用户")
+    _metrics(
+        [
+            ("用户总数", str(users.total)),
+            ("今日活跃", str(users.active_today)),
+            ("已禁用", str(users.disabled)),
+        ]
+    )
+
+    _stats_heading("文档")
+    _metrics(
+        [
+            ("文档总数", str(documents.total)),
+            ("公共文档", str(documents.public)),
+            ("个人文档", str(documents.personal)),
+            ("入库失败任务", str(documents.failed_tasks)),
+        ]
+    )
+    st.caption(f"公共文档占比 {documents.public_ratio * 100:.1f}%")
+
+    _stats_heading("问答量")
+    _metrics(
+        [
+            ("近 7 天", str(sum(count for _, count in volume[-7:]))),
+            ("近 30 天", str(sum(count for _, count in volume))),
+        ]
+    )
+    if any(count for _, count in volume):
+        _volume_chart(volume)
+    else:
+        _stats_empty("近 30 天还没有问答记录。")
+
+    _stats_heading("质量")
+    _metrics(
+        [
+            ("拒答率", f"{quality.refusal_rate * 100:.1f}%"),
+            ("降级次数", str(quality.degraded)),
+            ("平均耗时", f"{quality.avg_latency_ms:.0f} ms"),
+        ]
+    )
+    st.caption(f"样本 {quality.total} 次问答；指标已脱敏，不含问题原文与用户身份。")
+
+    _stats_heading("差评榜")
+    worst = stats_worst_answers(WORST_LIMIT, db)
+    if not worst:
+        _stats_empty("还没有「没用」反馈。")
+    for answer in worst:
+        _render_worst_row(answer)
+
+
+def _stats_heading(title: str) -> None:
+    st.markdown(
+        f'<div class="cqa-panel-head" style="border:0;padding:14px 0 6px"><h3>{html.escape(title)}</h3></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _stats_empty(text: str) -> None:
+    st.markdown(
+        f'<div class="cqa-panel"><div class="cqa-empty">{html.escape(text)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _metrics(items: list[tuple[str, str]]) -> None:
+    for column, (label, value) in zip(st.columns(len(items)), items):
+        column.metric(label, value)
+
+
+def _volume_chart(volume: list[tuple[str, int]]) -> None:
+    """问答量趋势图。pandas 由 Streamlit 传递依赖，此处延迟导入。"""
+    import pandas as pd
+
+    frame = pd.DataFrame(volume, columns=["日期", "问答次数"]).set_index("日期")
+    st.bar_chart(frame, height=220)
+
+
+def _render_worst_row(answer) -> None:
+    snippet = " ".join((answer.content or "").split())
+    if len(snippet) > SNIPPET_LENGTH:
+        snippet = snippet[:SNIPPET_LENGTH] + "…"
+    snippet = snippet or "（空回答）"
+    st.markdown(
+        f'<div class="cqa-row">'
+        f'<div class="cqa-fileicon">差</div>'
+        f'<div class="cqa-rowmain"><div class="cqa-name">{html.escape(snippet)}</div>'
+        f'<div class="cqa-meta">没用 {answer.useless} / 共 {answer.rated} 次评价</div></div>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ==================== 结果与提示 ====================

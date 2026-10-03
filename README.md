@@ -61,7 +61,7 @@
 | `docs/assets/screenshots/01-login.png` | 登录 / 注册页（协议勾选） |
 | `docs/assets/screenshots/02-qa.png` | 问答页：回答带 `【来源N】` 与引用卡片 |
 | `docs/assets/screenshots/03-documents.png` | 我的文档：上传、进度、列表 |
-| `docs/assets/screenshots/04-admin.png` | 管理员页：公共文档与用户管理 |
+| `docs/assets/screenshots/04-admin.png` | 管理员页：公共文档、用户管理、五维统计 |
 | `docs/assets/screenshots/05-settings.png` | 设置页：显示名 / 改密 / 注销 |
 
 ## 环境要求
