@@ -841,3 +841,70 @@ def cleanup_metrics(
             (f"-{days} days",),
         )
         return cursor.rowcount
+
+
+# ==================== 备份 / 恢复（FR-24，二期）====================
+#
+# 备份涉及的表与恢复顺序由外键依赖决定：users → documents → conversations
+# → messages → message_sources / feedback。
+# qa_metrics 是脱敏日志（90 天自动清理，可丢）、ingest_tasks 是瞬时状态，
+# 都不进备份。
+
+BACKUP_TABLES = (
+    "users",
+    "documents",
+    "conversations",
+    "messages",
+    "message_sources",
+    "feedback",
+)
+
+
+def export_tables(db_path: PathLike = None) -> dict[str, list[dict]]:
+    """导出备份涉及的全部表，按 id 升序，返回 `{表名: [行字典]}`。"""
+    with get_conn(db_path) as conn:
+        return {
+            name: [dict(row) for row in conn.execute(f"SELECT * FROM {name} ORDER BY id")]
+            for name in BACKUP_TABLES
+        }
+
+
+@retry_on_write_lock
+def import_tables(
+    tables: dict[str, list[dict]], *, db_path: PathLike = None
+) -> dict[str, int]:
+    """把备份数据整库写回，返回各表写入条数。
+
+    语义是**整库替换**：先按反向外键顺序清空这些表，再按正向顺序插入。
+    不清空会出现主键冲突，或新旧数据混在一起（恢复后看到的是两份数据的并集）。
+
+    列名来自备份文件，属外部输入：逐一比对表结构，出现未知列直接抛错，
+    避免被拼进 SQL。
+    """
+    counts: dict[str, int] = {}
+    with get_conn(db_path) as conn:
+        for name in reversed(BACKUP_TABLES):
+            conn.execute(f"DELETE FROM {name}")
+
+        for name in BACKUP_TABLES:
+            rows = tables.get(name) or []
+            _insert_rows(conn, name, rows)
+            counts[name] = len(rows)
+    return counts
+
+
+def _insert_rows(conn, table: str, rows: list[dict]) -> None:
+    if not rows:
+        return
+
+    allowed = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    columns = list(rows[0].keys())
+    unknown = set(columns) - allowed
+    if unknown:
+        raise ValueError(f"备份数据包含 {table} 表不存在的列：{sorted(unknown)}")
+
+    placeholders = ", ".join("?" for _ in columns)
+    conn.executemany(
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+        [tuple(row.get(column) for column in columns) for row in rows],
+    )

@@ -63,3 +63,13 @@ def db(tmp_path: Path) -> Path:
             [(1, "user-1", "x"), (2, "user-2", "x")],
         )
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolate_ingest_uploads(settings: Settings, monkeypatch) -> None:
+    """入库会把原始文件落盘到 uploads；测试里统一指到 tmp_path。
+
+    否则会写到仓库真实的 `data/uploads`，污染真实数据
+    （`ingest_file` 新增原始文件落盘后补的隔离）。
+    """
+    monkeypatch.setattr("src.ingest.pipeline.get_settings", lambda: settings)

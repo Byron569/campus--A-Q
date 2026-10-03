@@ -28,15 +28,13 @@ from src.repository import (
     get_task_by_doc,
     update_task,
 )
+from src.files import sanitize_filename, stored_path, uploads_dir
 from src.store.chroma import VectorStore
 from src.ui.documents import (
     delete_document,
     enqueue_new,
     retry_document,
-    sanitize_filename,
     stage_upload,
-    stored_path,
-    uploads_dir,
     validate_upload,
 )
 

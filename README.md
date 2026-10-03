@@ -143,6 +143,22 @@ python scripts/ingest_cli.py --query "搬宿舍需要提前申请吗"
 
 > 局域网内为明文 HTTP，仅建议在可信校园网络内使用。
 
+## 备份与恢复
+
+```bash
+# 导出备份（默认写到 backups/campus-qa-<时间>.zip）
+python scripts/backup.py
+
+# 从备份恢复（整库替换，目标库非空时必须加 --force）
+python scripts/restore.py backups/campus-qa-20261004-120000.zip --force
+```
+
+备份包含 `data/uploads/` 下的原始文件、六张业务表（用户 / 文档 / 会话 / 消息 / 引用 / 反馈）、
+`knowledge_base.yaml` 快照；**不含 `.env`、不含问答日志、不含向量**。恢复时会复用入库流水线
+**重新向量化**，因此换机器后首次恢复需要能加载 Embedding 模型。
+
+> 恢复是整库替换，会清空现有业务数据；操作前请先导出当前备份。
+
 ## 评测
 
 ```bash
@@ -170,8 +186,9 @@ src/store/              SQLite 与 Chroma 封装（向量访问唯一入口）
 src/auth/               密码哈希与认证服务
 src/providers/          LLM 与 Embedding 可插拔层
 src/repository.py       全部数据访问
+src/backup.py           备份导出与恢复
 eval/                   30 题评测集
-scripts/                模拟资料生成、批量入库、管理员初始化、评测
+scripts/                模拟资料生成、批量入库、管理员初始化、备份恢复、评测
 docs/                   需求、架构、任务、原型、接口、设计与开发计划
 tests/                  单元测试
 data/                   运行期数据（不入库）

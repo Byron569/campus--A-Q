@@ -66,3 +66,10 @@ class LLMUnavailable(CampusQAError):
 
     对应 docs/02 §4.6：上层据此走降级，展示检索到的原文片段。
     """
+
+
+class BackupError(CampusQAError):
+    """备份 / 恢复失败（FR-24，二期）。
+
+    文案面向管理员：备份文件损坏、版本不支持、目标库非空却未授权覆盖等。
+    """

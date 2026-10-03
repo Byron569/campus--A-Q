@@ -15,12 +15,21 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from config.settings import CHUNK_OVERLAP, CHUNK_SIZE, EMBED_BATCH_SIZE, UNCATEGORIZED_KEY
+from config.settings import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    EMBED_BATCH_SIZE,
+    UNCATEGORIZED_KEY,
+    Settings,
+    get_settings,
+)
 from src.errors import IngestError
+from src.files import stored_path
 from src.ingest.loader import load_document
 from src.ingest.splitter import split_text
 from src.repository import create_document, update_chunk_count, update_task
@@ -77,6 +86,7 @@ def ingest_file(
     store: VectorStore | None = None,
     batch_size: int = EMBED_BATCH_SIZE,
     db_path: Path | str | None = None,
+    settings: Settings | None = None,
 ) -> IngestResult:
     """把一个文件完整入库。
 
@@ -100,6 +110,7 @@ def ingest_file(
     """
     target = Path(path)
     started = time.perf_counter()
+    resolved_settings = settings or get_settings()
 
     # 个人资料必须有归属，否则 Chroma 元数据会落成 user_id=-1 且 is_public=0，
     # 任何查询都过滤不到，等于静默丢数据
@@ -128,6 +139,17 @@ def ingest_file(
             is_public=is_public,
             db_path=db_path,
         )
+
+    # 原始文件必须落盘一份：删除文档要删它，备份恢复要靠它重建向量。
+    # 网页上传已在 stage_upload 落盘（路径相同，这里按路径相等跳过），
+    # 批量入库（CLI）此前不落盘，导致备份恢复时「缺原始文件」无法重建（FB-4.x 实测）。
+    _persist_original(
+        target,
+        doc_id=doc_id,
+        user_id=user_id,
+        is_public=is_public,
+        settings=resolved_settings,
+    )
 
     # 总切片数先落库，前端进度分母才有意义；done_chunks 归零重新计数
     if task_id is not None:
@@ -174,3 +196,27 @@ def ingest_file(
         warning=load_result.warning,
         elapsed_ms=elapsed_ms,
     )
+
+
+def _persist_original(
+    source: Path, *, doc_id: int, user_id: int | None, is_public: bool, settings: Settings
+) -> None:
+    """把原始文件复制到 uploads 的标准位置（若已在同一路径则跳过）。
+
+    路径规则见 `src/files.py`；网页上传的 `stage_upload` 已按同一规则落盘，
+    因此走异步任务时这里会因路径相同而跳过，不会重复复制。
+    """
+    destination = stored_path(
+        owner_id=None if is_public else user_id,
+        doc_id=doc_id,
+        filename=source.name,
+        settings=settings,
+    )
+    if source.resolve() == destination.resolve():
+        return
+
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    except OSError as exc:
+        raise IngestError(f"原始文件落盘失败：{source.name}（{exc}）") from exc

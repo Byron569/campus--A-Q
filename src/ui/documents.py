@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import html
 import logging
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,13 +30,13 @@ import streamlit as st
 
 from config.settings import (
     ALLOWED_SUFFIXES,
-    PUBLIC_USER_ID,
     UNCATEGORIZED_KEY,
     Settings,
     category_options,
     get_settings,
 )
 from src.errors import CampusQAError, IngestError
+from src.files import stored_path
 from src.ingest.tasks import submit_ingest
 from src.repository import (
     DOC_ACTIVE,
@@ -80,27 +79,12 @@ STATUS_LABELS = {
     TASK_FAILED: "失败",
 }
 
-_ILLEGAL_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
-
 POLL_INTERVAL_SECONDS = 0.5
 # 进度轮询的总上限，防止个别卡死的任务把页面挂住
 MAX_POLL_SECONDS = 120
 
 
 # ==================== 纯逻辑（不依赖 Streamlit） ====================
-
-
-def sanitize_filename(name: str) -> str:
-    """清洗文件名：去掉目录部分与非法字符，避免目录穿越与路径注入。
-
-    Windows 风格的反斜杠在 POSIX 上不是分隔符，但上传者可能来自 Windows，
-    因此先把两种分隔符统一，再取最后一段。
-    """
-    normalized = (name or "").strip().replace("\\", "/")
-    base = _ILLEGAL_NAME_CHARS.sub("_", Path(normalized).name).strip()
-    # 去掉开头的点，避免落成隐藏文件或 "." / ".."
-    base = base.lstrip(".")
-    return base or "未命名文件"
 
 
 def validate_upload(filename: str, size_bytes: int, *, settings: Settings | None = None) -> str:
@@ -120,22 +104,6 @@ def validate_upload(filename: str, size_bytes: int, *, settings: Settings | None
         return f"文件超过 {cfg.max_upload_mb}MB 上限"
     return ""
 
-
-def uploads_dir(owner_id: int | None, *, settings: Settings) -> Path:
-    """该归属者的上传目录：data/uploads/<user_id>/。
-
-    公共文档的 user_id 用占位值 -1，与 Chroma 元数据里的约定保持一致。
-    """
-    directory = settings.uploads_path / str(PUBLIC_USER_ID if owner_id is None else owner_id)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
-
-
-def stored_path(
-    *, owner_id: int | None, doc_id: int, filename: str, settings: Settings
-) -> Path:
-    """落盘路径。带 doc_id 前缀，保证同名文件互不覆盖，且可由文档记录反推出来。"""
-    return uploads_dir(owner_id, settings=settings) / f"{doc_id}_{sanitize_filename(filename)}"
 
 
 @dataclass
