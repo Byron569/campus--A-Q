@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from src.auth import service
 from src.auth.security import hash_password, validate_password, verify_password
 from src.auth.service import (
     INVALID_CREDENTIALS_TEXT,
@@ -22,7 +23,19 @@ from src.auth.service import (
     validate_username,
 )
 from src.errors import AccountDisabled, AuthError, PermissionDenied, UsernameTaken
-from src.repository import USER_ROLE_ADMIN, User, create_user, get_user, get_user_by_name
+from src.repository import (
+    USER_ROLE_ADMIN,
+    User,
+    add_message,
+    create_conversation,
+    create_document,
+    create_user,
+    get_user,
+    get_user_by_name,
+    list_conversations,
+    list_documents,
+)
+from src.store.chroma import build_metadata
 from src.store.db import get_conn
 
 PASSWORD = "secret123"
@@ -264,3 +277,65 @@ def test_change_display_name_rejects_blank(db: Path) -> None:
 
     with pytest.raises(AuthError, match="不能为空"):
         change_display_name(user.id, "   ", db_path=db)
+
+
+# ==================== TC-U25：注销（跨库级联清理）====================
+
+
+def test_delete_account_purges_vectors_files_and_records(
+    db: Path, store, settings
+) -> None:
+    """FR-25：注销后不应有任何残留——文档、向量、文件、会话全清，公共数据不动。"""
+    user = new_user(db)
+    doc_id = create_document(
+        filename="我的资料.txt", filetype="txt", category="uncategorized",
+        user_id=user.id, db_path=db,
+    )
+    store.add_chunks([("私人内容", build_metadata(
+        doc_id=doc_id, user_id=user.id, is_public=False, category="uncategorized",
+        filename="我的资料.txt", chunk_index=0,
+    ))])
+    store.add_chunks([("公共内容", build_metadata(
+        doc_id=999, user_id=None, is_public=True, category="admin",
+        filename="公共资料.txt", chunk_index=0,
+    ))])
+    upload_dir = settings.uploads_path / str(user.id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{doc_id}_我的资料.txt").write_text("内容", encoding="utf-8")
+    conversation_id = create_conversation(user.id, db_path=db)
+    add_message(conversation_id, "user", "问题", db_path=db)
+
+    service.delete_account(user.id, store=store, settings=settings)
+
+    assert get_user(user.id, db_path=db) is None
+    assert list_documents(user_id=user.id, db_path=db) == ([], 0)
+    assert list_conversations(user.id, db_path=db) == ([], 0)
+    assert not upload_dir.exists()
+    assert store.count() == 1  # 只剩公共向量
+
+
+def test_delete_account_aborts_before_touching_database(
+    db: Path, store, settings, monkeypatch
+) -> None:
+    """向量清理失败必须中止，且**不进入** SQLite 事务，避免半删状态。"""
+    user = new_user(db)
+    create_document(
+        filename="我的资料.txt", filetype="txt", category="", user_id=user.id, db_path=db
+    )
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("chroma 挂了")
+
+    monkeypatch.setattr(store, "delete_by_user_id", boom)
+
+    with pytest.raises(RuntimeError):
+        service.delete_account(user.id, store=store, settings=settings)
+
+    # 账号与文档原封不动，可重试
+    assert get_user(user.id, db_path=db) is not None
+    assert list_documents(user_id=user.id, db_path=db)[1] == 1
+
+
+def test_delete_account_rejects_missing_user(db: Path, store, settings) -> None:
+    with pytest.raises(AuthError, match="账号不存在"):
+        service.delete_account(999, store=store, settings=settings)

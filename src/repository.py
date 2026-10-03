@@ -244,6 +244,100 @@ def update_display_name(user_id: int, display_name: str, db_path: PathLike = Non
         return cursor.rowcount > 0
 
 
+def list_users(
+    *,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    db_path: PathLike = None,
+) -> tuple[list[User], int]:
+    """分页列出账号（管理员页 FR-16）。`keyword` 模糊匹配用户名与显示名。"""
+    conditions = ["1 = 1"]
+    params: list[object] = []
+    if keyword and keyword.strip():
+        conditions.append("(username LIKE ? OR display_name LIKE ?)")
+        like = f"%{keyword.strip()}%"
+        params += [like, like]
+
+    where = " AND ".join(conditions)
+    offset = max(page - 1, 0) * page_size
+
+    with get_conn(db_path) as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM users WHERE {where}", params
+        ).fetchone()["n"]
+        rows = conn.execute(
+            f"""
+            SELECT * FROM users
+             WHERE {where}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ? OFFSET ?
+            """,
+            [*params, page_size, offset],
+        ).fetchall()
+    return [_to_user(row) for row in rows], int(total)
+
+
+@retry_on_write_lock
+def set_user_status(user_id: int, status: str, db_path: PathLike = None) -> bool:
+    """启用 / 禁用账号（FR-16）。禁用后该账号无法登录，且已建立的登录态立即失效。"""
+    if status not in (USER_STATUS_ACTIVE, USER_STATUS_DISABLED):
+        raise ValueError(f"未知的账号状态：{status}")
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET status = ? WHERE id = ?", (status, user_id)
+        )
+        return cursor.rowcount > 0
+
+
+@retry_on_write_lock
+def delete_user(user_id: int, db_path: PathLike = None) -> None:
+    """删除账号在 SQLite 中的**全部**关联数据（FR-25，单事务）。
+
+    顺序按外键依赖：feedback → message_sources → messages → conversations
+    → ingest_tasks → documents → users。
+
+    向量库与磁盘文件不在这里处理（数据访问层不碰向量层）——
+    由 `auth.service.delete_account` 先清向量与文件、再调本函数，
+    保证「要么全删，要么不留半删状态」（docs/02 §4.9）。
+    """
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            DELETE FROM feedback
+             WHERE user_id = ?
+                OR message_id IN (
+                    SELECT m.id FROM messages m
+                     JOIN conversations c ON c.id = m.conversation_id
+                    WHERE c.user_id = ?
+                )
+            """,
+            (user_id, user_id),
+        )
+        conn.execute(
+            """
+            DELETE FROM message_sources
+             WHERE message_id IN (
+                SELECT m.id FROM messages m
+                 JOIN conversations c ON c.id = m.conversation_id
+                WHERE c.user_id = ?
+             )
+            """,
+            (user_id,),
+        )
+        conn.execute(
+            """
+            DELETE FROM messages
+             WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id = ?)
+            """,
+            (user_id,),
+        )
+        conn.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM ingest_tasks WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM documents WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
 # ==================== documents ====================
 
 

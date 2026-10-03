@@ -20,6 +20,8 @@ from src.repository import (
     TASK_FAILED,
     TASK_PENDING,
     TASK_RUNNING,
+    USER_STATUS_ACTIVE,
+    USER_STATUS_DISABLED,
     add_feedback,
     add_message,
     add_metric,
@@ -27,21 +29,26 @@ from src.repository import (
     create_conversation,
     create_document,
     create_task,
+    create_user,
     delete_conversation,
+    delete_user,
     exists_active_task,
     get_conversation,
     get_document,
     get_feedback,
     get_task,
     get_task_by_doc,
+    get_user,
     list_conversations,
     list_documents,
     list_messages,
     list_sources_by_message,
     list_tasks_by_user,
+    list_users,
     recover_stale_tasks,
     rename_conversation,
     reset_task,
+    set_user_status,
     soft_delete_document,
     update_chunk_count,
     update_task,
@@ -319,6 +326,89 @@ def test_reset_task_clears_warning(db: Path) -> None:
 def test_task_without_warning_is_none(db: Path) -> None:
     doc_id = make_doc(db)
     assert get_task(create_task(doc_id, db_path=db), db_path=db).warning is None
+
+
+# ==================== 用户管理（M3-04 / FR-16）====================
+
+
+def test_list_users_pagination(db: Path) -> None:
+    for index in range(5):
+        create_user(username=f"stu-{index}", password_hash="x", db_path=db)
+
+    rows, total = list_users(page=1, page_size=3, db_path=db)
+
+    assert total == 7  # 夹具预置 2 个 + 这里 5 个
+    assert len(rows) == 3
+
+
+def test_list_users_keyword_matches_username_and_display_name(db: Path) -> None:
+    create_user(username="alice", password_hash="x", display_name="小艾", db_path=db)
+    create_user(username="bob", password_hash="x", display_name="小波", db_path=db)
+
+    by_name, _ = list_users(keyword="ali", db_path=db)
+    by_display, _ = list_users(keyword="小波", db_path=db)
+
+    assert [u.username for u in by_name] == ["alice"]
+    assert [u.username for u in by_display] == ["bob"]
+
+
+def test_set_user_status_toggles(db: Path) -> None:
+    assert set_user_status(1, USER_STATUS_DISABLED, db_path=db) is True
+    assert get_user(1, db_path=db).is_active is False
+
+    assert set_user_status(1, USER_STATUS_ACTIVE, db_path=db) is True
+    assert get_user(1, db_path=db).is_active is True
+
+
+def test_set_user_status_rejects_unknown_value(db: Path) -> None:
+    with pytest.raises(ValueError, match="未知的账号状态"):
+        set_user_status(1, "banana", db_path=db)
+
+
+def test_delete_user_removes_every_related_row(db: Path) -> None:
+    """FR-25：账号删除必须连带清掉其文档、任务、会话、消息、引用与反馈。"""
+    doc_id = create_document(
+        filename="我的资料.txt", filetype="txt", category="uncategorized",
+        user_id=1, db_path=db,
+    )
+    create_task(doc_id, user_id=1, db_path=db)
+    conversation_id = create_conversation(1, title="会话", db_path=db)
+    message_id = add_message(conversation_id, ROLE_ASSISTANT, "答案", db_path=db)
+    add_sources(
+        message_id,
+        [SearchHit(text="片段", score=0.5, filename="a.txt", doc_id=doc_id,
+                   chunk_index=0, category="", matched_by="vector")],
+        db_path=db,
+    )
+    add_feedback(message_id, 1, RATING_USEFUL, db_path=db)
+
+    delete_user(1, db_path=db)
+
+    assert get_user(1, db_path=db) is None
+    assert list_documents(user_id=1, db_path=db) == ([], 0)
+    assert list_tasks_by_user(1, db_path=db) == ([], 0)
+    assert list_conversations(1, db_path=db) == ([], 0)
+    assert list_messages(conversation_id, db_path=db) == []
+    assert list_sources_by_message(message_id, db_path=db) == []
+    with get_conn(db) as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM feedback").fetchone()["n"] == 0
+
+
+def test_delete_user_keeps_other_users_data(db: Path) -> None:
+    create_document(
+        filename="a.txt", filetype="txt", category="", user_id=1, db_path=db
+    )
+    create_document(
+        filename="b.txt", filetype="txt", category="", user_id=2, db_path=db
+    )
+    other_conversation = create_conversation(2, title="别人的", db_path=db)
+    add_message(other_conversation, ROLE_USER, "别人的消息", db_path=db)
+
+    delete_user(1, db_path=db)
+
+    assert get_user(2, db_path=db) is not None
+    assert list_documents(user_id=2, db_path=db)[1] == 1
+    assert [m.content for m in list_messages(other_conversation, db_path=db)] == ["别人的消息"]
 
 
 def test_list_tasks_by_user_pagination(db: Path) -> None:

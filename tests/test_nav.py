@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from app import DEFAULT_PAGE, PAGES, PAGES_BY_KEY, resolve_page
 
-# 截至 M3 已实现的页面：问答（M2-05）、我的文档（M1-18）、设置（M3-16）、关于（M3-17）
-IMPLEMENTED_PAGES = {"qa", "documents", "settings", "about"}
+# 截至 M3 已实现的页面：问答（M2-05）、我的文档（M1-18）、管理员（M3-04）、
+# 设置（M3-16）、关于（M3-17）——五个页面全部交付
+IMPLEMENTED_PAGES = {"qa", "documents", "admin", "settings", "about"}
 
 
 def test_navigation_has_the_five_designed_entries() -> None:

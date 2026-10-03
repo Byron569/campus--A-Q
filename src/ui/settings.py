@@ -1,14 +1,13 @@
-"""设置页（PG-05 / FR-26）。
+"""设置页（PG-05 / FR-25、FR-26）。
 
 设计依据：
-- docs/05-产品原型与交互说明.md §PG-05（显示名、改密、注销入口）
-- docs/03-开发任务清单.md M3-16
+- docs/05-产品原型与交互说明.md §PG-05（显示名、改密、注销账号）、§G-08（危险操作需二次确认）
+- docs/03-开发任务清单.md M3-05（注销）、M3-16（设置页）
 
-**本期范围**：显示名与密码修改已交付；「注销账号」属 M3-05（FB-3.3），
-与级联清理一起做——此处**不放一个点了没反应的死按钮**。
-
-两个表单都用 `st.form`：Streamlit 的 `text_input` 只在失焦/回车时提交值，
+三个表单都用 `st.form`：Streamlit 的 `text_input` 只在失焦/回车时提交值，
 配普通按钮会出现「填了却没带上」（FB-2.4 踩过这个坑）。
+
+注销的「二次确认」按原型实现为：**先勾选「我已知晓数据不可恢复」，确认按钮才可用**。
 """
 
 from __future__ import annotations
@@ -17,13 +16,14 @@ import streamlit as st
 
 from config.settings import Settings
 from src.auth import service
-from src.errors import AuthError
+from src.errors import AuthError, CampusQAError
 from src.repository import User
+from src.store.chroma import VectorStore
 
 STATE_NOTICE = "settings_notice"
 
 
-def render(*, settings: Settings, user: User) -> None:
+def render(*, settings: Settings, user: User, store: VectorStore) -> None:
     """渲染设置页。"""
     _drain_notice()
 
@@ -36,6 +36,7 @@ def render(*, settings: Settings, user: User) -> None:
 
     _render_display_name(user, settings)
     _render_password(user, settings)
+    _render_delete_account(user, settings=settings, store=store)
 
 
 def _drain_notice() -> None:
@@ -93,3 +94,38 @@ def _do_change_password(
         return
 
     st.success("密码已更新")
+
+
+def _render_delete_account(user: User, *, settings: Settings, store: VectorStore) -> None:
+    """注销账号（FR-25）：勾选确认后才可执行，成功后回登录页。"""
+    st.markdown(
+        '<div class="cqa-panel-head" style="border:0;padding:16px 0 6px"><h3>注销账号</h3></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="cqa-page-desc">注销后你的个人文档、向量、会话与反馈会被一并清除，'
+        "不可恢复。公共文档与他人数据不受影响。</div>",
+        unsafe_allow_html=True,
+    )
+
+    agreed = st.checkbox("我已知晓数据不可恢复", key="delete-account-agreed")
+    if st.button(
+        "确认注销账号",
+        key="delete-account-confirm",
+        type="primary",
+        disabled=not agreed,
+    ):
+        _do_delete_account(user, settings=settings, store=store)
+
+
+def _do_delete_account(user: User, *, settings: Settings, store: VectorStore) -> None:
+    try:
+        service.delete_account(user.id, store=store, settings=settings)
+    except CampusQAError as exc:
+        # 失败时不进入 SQLite 事务，因此不会留下半删状态，直接重试即可
+        st.error(f"注销失败，请重试：{exc}")
+        return
+
+    from src.ui import login
+
+    login.logout()

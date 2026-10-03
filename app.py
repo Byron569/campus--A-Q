@@ -35,7 +35,7 @@ from src.ingest.tasks import recover_stale_tasks
 from src.repository import User, get_user
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import about, chat, documents, login, theme
+from src.ui import about, admin, chat, documents, login, theme
 from src.ui import settings as ui_settings
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ PAGES = (
         "key": "admin",
         "label": "管理员",
         "icon": ":material/manage_accounts:",
-        "plan": "公共文档与用户管理（docs/03 M3-04）",
+        "plan": "",
     },
     {"key": "settings", "label": "设置", "icon": ":material/settings:", "plan": ""},
     {"key": "about", "label": "关于", "icon": ":material/info:", "plan": ""},
@@ -213,8 +213,10 @@ def main() -> None:
         chat.render(settings=settings, store=get_vector_store(), user=user)
     elif current == "documents":
         documents.render(settings=settings, store=get_vector_store(), user=user)
+    elif current == "admin":
+        admin.render(settings=settings, store=get_vector_store(), user=user)
     elif current == "settings":
-        ui_settings.render(settings=settings, user=user)
+        ui_settings.render(settings=settings, user=user, store=get_vector_store())
     elif current == "about":
         about.render(settings=settings)
     else:

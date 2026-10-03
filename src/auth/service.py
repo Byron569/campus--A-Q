@@ -15,18 +15,25 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
+from typing import TYPE_CHECKING
 
 from src.auth.security import hash_password, validate_password, verify_password
 from src.errors import AccountDisabled, AuthError, PermissionDenied, UsernameTaken
 from src.repository import (
     User,
     create_user,
+    delete_user,
     get_user,
     get_user_by_name,
     update_display_name,
     update_password,
 )
+
+if TYPE_CHECKING:
+    from config.settings import Settings
+    from src.store.chroma import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +191,35 @@ def change_display_name(user_id: int, display_name: str, *, db_path=None) -> Use
         raise AuthError("账号不存在")
 
     return get_user(user_id, db_path=db_path)
+
+
+def delete_account(
+    user_id: int,
+    *,
+    store: VectorStore,
+    settings: Settings,
+    db_path=None,
+) -> None:
+    """注销账号 / 管理员删除用户（FR-25）：跨 SQLite + Chroma + 文件系统清理。
+
+    **顺序不能反**（docs/02 §4.9）：先清向量与文件（两者都可重入），再进 SQLite
+    单事务删记录。若先删库、后清向量，一旦向量清理失败，文档记录没了、向量还在，
+    检索就会命中「幽灵切片」；反过来最坏只是向量已清、库里还有记录，重试即可。
+
+    向量清理失败会直接抛出，**不进入 SQLite 事务**，因此不会留下半删状态。
+    """
+    resolved_db = db_path or settings.database_path
+    if get_user(user_id, db_path=resolved_db) is None:
+        raise AuthError("账号不存在")
+
+    # 1) 向量：只删该用户的非公共向量（公共文档 user_id=-1，不受影响）
+    store.delete_by_user_id(user_id)
+
+    # 2) 原始文件：该用户的整个上传目录一起删
+    directory = settings.uploads_path / str(user_id)
+    if directory.exists():
+        shutil.rmtree(directory, ignore_errors=True)
+
+    # 3) SQLite：单事务删掉全部关联记录
+    delete_user(user_id, db_path=resolved_db)
+    logger.info("账号已注销：user_id=%s", user_id)
