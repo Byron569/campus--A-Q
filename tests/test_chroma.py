@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from config.settings import PUBLIC_USER_ID
+from config.settings import CHROMA_DISTANCE, PUBLIC_USER_ID
 from src.store.chroma import VectorStore, build_metadata
 
 
@@ -50,6 +50,16 @@ def test_build_metadata_for_public_document_uses_sentinel_user_id() -> None:
 
 
 # ==================== 基础读写 ====================
+
+
+def test_collection_uses_cosine_distance(store: VectorStore) -> None:
+    """C-04：集合必须以 cosine 建。
+
+    否则 `score = 1 - 距离` 就不再是余弦相似度，阈值与 Top-K 的语义全部失准。
+    集合的度量创建后不可改，这条必须固定住。
+    """
+    metadata = store._store._collection.metadata  # noqa: SLF001
+    assert metadata["hnsw:space"] == CHROMA_DISTANCE == "cosine"
 
 
 def test_add_and_count(store: VectorStore) -> None:
