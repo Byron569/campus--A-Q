@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from config.settings import Settings
 from src.rag.retriever import build_retriever
 from src.store.chroma import VectorStore, build_metadata
@@ -37,6 +39,34 @@ def add(
 
 def make(store: VectorStore, settings: Settings, *, user_id=None, category=None):
     return build_retriever(user_id, category, store=store, settings=settings)
+
+
+# ==================== 构造契约（FR-31 安全红线）====================
+
+
+def test_build_retriever_carries_identity_and_category(
+    store: VectorStore, settings: Settings
+) -> None:
+    """身份与分类必须是构造期就钉死的，检索时不允许被覆盖成无过滤。"""
+    retriever = build_retriever(7, "admin", store=store, settings=settings)
+
+    assert retriever.user_id == 7
+    assert retriever.category == "admin"
+
+
+def test_build_retriever_requires_user_id(store: VectorStore, settings: Settings) -> None:
+    """漏传身份在调用层就失败，不允许退化成无过滤（FR-31 / TC-U21）。"""
+    with pytest.raises(TypeError):
+        build_retriever(store=store, settings=settings)  # type: ignore[call-arg]
+
+
+def test_anonymous_retriever_sees_only_public(store: VectorStore, settings: Settings) -> None:
+    add(store, "公共通知：机房开放", doc_id=1, is_public=True)
+    add(store, "个人笔记：机房实验记录", doc_id=2, user_id=1)
+
+    hits = build_retriever(None, store=store, settings=settings).search("机房")
+
+    assert {hit.doc_id for hit in hits} == {1}
 
 
 # ==================== 融合与 matched_by（DR-15）====================
