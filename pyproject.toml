@@ -1,0 +1,11 @@
+[project]
+name = "campus-qa"
+version = "0.1.0"
+description = "校答 —— 面向大学生的校园知识库 RAG 问答系统"
+requires-python = ">=3.11"
+
+# 依赖统一由 requirements.txt 管理，此处仅放工具配置
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

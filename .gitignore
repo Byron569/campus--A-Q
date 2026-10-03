@@ -1,0 +1,26 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+
+# ---- 环境变量与密钥（严禁提交）----
+.env
+
+# ---- 运行期数据（上传文件、向量库、数据库、备份）----
+data/
+backups/
+
+# ---- IDE ----
+.idea/
+.vscode/
+.trae/
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db

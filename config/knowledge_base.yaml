@@ -1,0 +1,20 @@
+# 知识库业务配置（配置驱动核心，FR-27）
+# 换一所学校时，只需修改本文件与资料，无需改动代码。
+
+school:
+  name: "示例大学"
+  contact: "学生工作处 0597-0000000"
+  notice: "本知识库内容由学校公开文件整理，如与最新通知冲突，以学校官方发布为准。"
+
+# 知识库分类。key 会写入 documents.category 与 Chroma 元数据。
+# 注意：uncategorized（未分类）为程序内置保留值，不可在此占用。
+categories:
+  - key: freshman
+    name: 新生事务
+    desc: 报到、宿舍、军训、校园卡、转专业
+  - key: admin
+    name: 行政事务
+    desc: 请假、奖学金、补考重修、图书馆、机房
+  - key: course
+    name: 课程资料
+    desc: 课件、讲义、作业说明

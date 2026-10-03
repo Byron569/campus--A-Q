@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>校答 · 产品原型 v1.0</title>
+<style>
+/* ===== 设计令牌：取自 Doubao Design Library（docs/design/doubao/colors_and_type.css）===== */
+:root{
+  --bg:#ffffff; --surface:#ffffff; --surface-muted:#eff1f4;
+  --text:#0e1115; --text-muted:#5b6675; --border:#e7eaef;
+  --brand:#0065fd; --brand-soft:#e5e9ff; --brand-text:#00266b;
+  --danger:#ef4444; --success:#16a34a; --info:#0ea5e9; --ring:#557fff;
+  --radius:10px; --radius-card:14px; --radius-pill:999px;
+  --font:"Stack Sans Text","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+/* 仅浅色模式（变更申请 CR-01：取消暗色与主题切换），不注入 .dark 令牌 */
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:400 14px/20px var(--font)}
+button{font:inherit;cursor:pointer}
+.hide{display:none!important}
+
+/* 顶部 */
+.topbar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--border)}
+.topbar .logo{font-weight:600;font-size:16px}
+.topbar .meta{color:var(--text-muted);font-size:12px}
+.topbar .grow{flex:1}
+.tag{font-size:12px;color:var(--text-muted);border:1px solid var(--border);border-radius:999px;padding:2px 10px}
+
+/* 布局 */
+.shell{display:flex;min-height:calc(100vh - 49px)}
+.side{width:200px;flex:none;background:var(--surface-muted);border-right:1px solid var(--border);padding:12px}
+.side button{display:block;width:100%;text-align:left;padding:9px 12px;margin-bottom:4px;border:1px solid transparent;border-radius:var(--radius);background:transparent;color:var(--text)}
+.side button:hover{background:var(--brand-soft)}
+.side button.active{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-text);font-weight:500}
+.main{flex:1;padding:20px;max-width:1080px;overflow-x:auto;min-width:0}
+@media (max-width:720px){ .topbar .meta{display:none} .side{width:140px} }
+
+/* 通用 */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);padding:20px;margin-bottom:16px}
+.card h2{margin:0 0 4px;font-size:16px;font-weight:500}
+.card .sub{color:var(--text-muted);font-size:12px;margin-bottom:16px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.col{display:flex;flex-direction:column;gap:8px}
+input[type=text],input[type=password],textarea{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-muted);color:var(--text);font:inherit}
+.btn{padding:9px 16px;border-radius:var(--radius);border:1px solid var(--brand);background:var(--brand);color:#fff}
+.btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+.btn.ghost:hover{background:var(--surface-muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.danger{background:transparent;border-color:var(--danger);color:var(--danger)}
+.drop{border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface-muted);padding:24px;text-align:center;color:var(--text-muted);cursor:pointer}
+.bar{height:8px;border-radius:4px;background:var(--surface-muted);overflow:hidden;margin-top:6px}
+.bar > i{display:block;height:100%;background:var(--brand);width:0;transition:width .4s}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--text-muted);font-weight:400;font-size:12px}
+.ok{color:var(--success)} .run{color:var(--info)} .fail{color:var(--danger)}
+.note{font-size:12px;color:var(--text-muted);margin-top:8px}
+
+/* 聊天 */
+.chat{display:flex;gap:16px}
+.conv{width:190px;flex:none;border-right:1px solid var(--border);padding-right:12px}
+.conv .item{padding:8px 10px;border-radius:var(--radius);cursor:pointer;font-size:13px}
+.conv .item.active{background:var(--brand-soft);color:var(--brand-text)}
+.bubbles{flex:1;min-width:0}
+.msg{margin-bottom:16px;max-width:88%}
+.msg .who{font-size:12px;color:var(--text-muted);margin-bottom:4px}
+.msg .body{padding:12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface)}
+.msg.me{margin-left:auto}
+.msg.me .body{background:var(--surface-muted)}
+.msg.ai .body{border-color:var(--brand)}
+.cite{margin-top:10px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface-muted);padding:10px}
+.cite .hd{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);cursor:pointer}
+.cite .full{margin-top:8px;font-size:12px;color:var(--text);border-top:1px solid var(--border);padding-top:8px}
+.acts{display:flex;gap:8px;margin-top:10px}
+.acts button{font-size:12px;padding:4px 10px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text-muted)}
+.acts button.on{border-color:var(--brand);color:var(--brand-text);background:var(--brand-soft)}
+.composer{margin-top:16px;display:flex;gap:8px}
+.refuse{border-color:var(--border)!important;color:var(--text)}
+
+/* 模态 */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--surface);border-radius:var(--radius-card);padding:20px;max-width:420px;width:100%;border:1px solid var(--border);box-shadow:0 8px 24px rgba(14,17,21,.10)}
+.modal h3{margin:0 0 8px;font-size:16px;font-weight:500}
+.login-wrap{max-width:380px;margin:8vh auto}
+.switch{font-size:12px;color:var(--brand);cursor:pointer;text-align:center;display:block;margin-top:12px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text)}
+.tabs button.active{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-text)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-muted);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">校答</span>
+  <span class="meta">原型 v1.0 · 设计令牌取自 Doubao Design Library</span>
+  <span class="grow"></span>
+  <span class="tag" id="roleTag">未登录</span>
+  <button class="btn ghost" id="adminToggle" title="原型调试用：实现版本通过登录身份判断角色，不存在此按钮">【调试】切换角色：普通用户</button>
+</div>
+
+<!-- ================= PG-01 登录 / 注册 ================= -->
+<div id="pg01" class="login-wrap">
+  <div class="card">
+    <h2>示例大学 · 校答</h2>
+    <div class="sub">校园知识库助手 · 请先登录</div>
+    <div class="col" id="loginForm">
+      <input type="text" id="lgUser" placeholder="用户名">
+      <input type="password" id="lgPwd" placeholder="密码">
+      <div class="note" id="lgErr"></div>
+      <button class="btn" id="doLogin">登 录</button>
+      <a class="switch" id="toRegister">还没有账号？去注册 →</a>
+    </div>
+    <div class="col hide" id="regForm">
+      <input type="text" id="rgUser" placeholder="用户名（1~50 位）">
+      <input type="password" id="rgPwd" placeholder="密码（至少 6 位）">
+      <input type="password" id="rgPwd2" placeholder="确认密码">
+      <label class="note"><input type="checkbox" id="rgAgree"> 我已阅读并同意《用户协议与隐私说明》</label>
+      <div class="note" id="rgErr"></div>
+      <button class="btn" id="doRegister" disabled>注 册</button>
+      <a class="switch" id="toLogin">已有账号？去登录 →</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="sub" style="margin:0">守卫规则：未登录访问任意页面一律回到本页（G-01）；普通用户看不到「管理员页」（G-03）。</div>
+  </div>
+</div>
+
+<!-- ================= 已登录外壳 ================= -->
+<div class="shell hide" id="shell">
+  <nav class="side">
+    <button data-pg="pg02" class="active">问答</button>
+    <button data-pg="pg03">我的文档</button>
+    <button data-pg="pg04" id="navAdmin">管理员页</button>
+    <button data-pg="pg05">设置</button>
+    <button data-pg="pg06">关于 / 隐私</button>
+  </nav>
+  <main class="main">
+
+    <!-- PG-02 问答页 -->
+    <section id="pg02">
+      <div class="card">
+        <h2>问答</h2>
+        <div class="sub">默认落地页 · 多轮对话 + 引用溯源 + 流式输出</div>
+        <div class="chat">
+          <aside class="conv">
+            <div class="item active">搬宿舍流程</div>
+            <div class="item">奖学金怎么申请</div>
+            <div class="item" style="color:var(--text-muted)">＋ 新建会话</div>
+          </aside>
+          <div class="bubbles">
+            <div class="msg me"><div class="who">我</div><div class="body">搬宿舍需要提前申请吗？</div></div>
+            <div class="msg ai">
+              <div class="who">校答</div>
+              <div class="body">
+                需要提前 3 个工作日向辅导员提交申请。【来源1】
+                <div class="cite">
+                  <div class="hd" id="citeHd"><span>来源1 · 宿舍搬迁通知</span><span>相似度 0.82　▾ 展开原文</span></div>
+                  <div class="full hide" id="citeFull">「学生因转专业、调整宿舍等原因需搬迁的，应提前 3 个工作日向所在学院辅导员提交书面申请，经批准后由宿管中心统一安排。」</div>
+                </div>
+                <div class="acts">
+                  <button id="fbUp">有用</button>
+                  <button id="fbDown">没用</button>
+                  <button id="btnCopy">复制答案</button>
+                  <button id="btnExport">导出会话</button>
+                </div>
+              </div>
+            </div>
+            <div class="composer">
+              <input type="text" id="askInput" placeholder="输入你的问题…（试试问：外星人专业怎么报名）">
+              <button class="btn" id="btnAsk">发送</button>
+            </div>
+            <div class="note">追问无需重述背景：系统先做 Query 改写再检索（FR-11）。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PG-03 我的文档 -->
+    <section id="pg03" class="hide">
+      <div class="card">
+        <h2>我的文档</h2>
+        <div class="sub">多选批量上传 · 异步入库 + 进度 · 失败可手动重试</div>
+        <div class="drop" id="dropZone">拖拽或点击选择文件（支持 PDF / DOCX / TXT / MD，单文件 ≤20MB，可多选）</div>
+        <div class="row" style="margin-top:12px">
+          <select id="pg03Cat" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface-muted);color:var(--text)">
+            <option>分类：未分类</option><option>新生事务</option><option>行政事务</option><option>课程资料</option>
+          </select>
+          <button class="btn" id="btnUpload">开始上传</button>
+          <span class="note" id="upHint"></span>
+        </div>
+        <div class="note">不上传的具体流程：选文件 → 校验 → 建任务 → 后台切片入库 → 进度推进 → 完成可检索。</div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>文件名</th><th>分类</th><th>状态</th><th style="width:180px">进度</th><th style="width:90px">操作</th></tr></thead>
+          <tbody>
+            <tr><td>学生手册.pdf</td><td>新生事务</td><td class="ok">完成 · 128 切片</td><td><div class="bar"><i style="width:100%"></i></div></td><td><button class="btn ghost" style="padding:4px 10px">删除</button></td></tr>
+            <tr><td>新生报到须知.docx</td><td>新生事务</td><td class="run">入库中 62%</td><td><div class="bar"><i id="upBar" style="width:62%"></i></div></td><td><button class="btn ghost" style="padding:4px 10px">删除</button></td></tr>
+            <tr><td>机房开放通知.pdf</td><td>未分类</td><td class="fail">失败 · 未能提取到文本</td><td><div class="bar"><i id="retryBar" style="width:0"></i></div></td><td><button class="btn ghost" style="padding:4px 10px" id="btnRetry">重试</button></td></tr>
+          </tbody>
+        </table>
+        <div class="note">‹ 1 2 3 ›　每页 10 条　·　失败不自动重试，点击「重试」重新入库（FR-06）</div>
+      </div>
+    </section>
+
+    <!-- PG-04 管理员页 -->
+    <section id="pg04" class="hide">
+      <div class="card">
+        <h2>管理员页</h2>
+        <div class="sub">仅 admin 可见 · 承担内容治理与用户管理（五维统计已归二期）</div>
+        <div class="tabs">
+          <button class="active" data-tab="pub">公共文档</button>
+          <button data-tab="usr">用户管理</button>
+        </div>
+        <div id="tabPub">
+          <div class="drop">拖拽上传公共文档（分类必选，上传后全员可检索）</div>
+          <div class="note">公共文档 <code>is_public=1</code>、<code>user_id=NULL</code>；普通用户只能看不能删。</div>
+        </div>
+        <div id="tabUsr" class="hide">
+          <table>
+            <thead><tr><th>用户</th><th>状态</th><th style="width:160px">操作</th></tr></thead>
+            <tbody>
+              <tr><td>zhangsan</td><td>正常</td><td><button class="btn ghost" style="padding:4px 10px">禁用</button> <button class="btn danger" style="padding:4px 10px">删除</button></td></tr>
+              <tr><td>lisi</td><td class="fail">已禁用</td><td><button class="btn ghost" style="padding:4px 10px">启用</button> <button class="btn danger" style="padding:4px 10px">删除</button></td></tr>
+            </tbody>
+          </table>
+          <div class="note">删除用户将级联清除其文档、向量、会话与反馈（FR-16 / FR-25）。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PG-05 设置 -->
+    <section id="pg05" class="hide">
+      <div class="card">
+        <h2>设置</h2>
+        <div class="sub">账号信息 · 主题 · 注销</div>
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:1;min-width:200px"><div class="note">显示名</div><input type="text" value="张三"></div>
+          <button class="btn">保存</button>
+        </div>
+        <div class="row" style="align-items:flex-end;margin-top:16px">
+          <div style="flex:1;min-width:200px"><div class="note">新密码（至少 6 位）</div><input type="password" placeholder="需先验证旧密码"></div>
+          <button class="btn">修改</button>
+        </div>
+        <div class="note" style="margin-top:20px">本系统仅提供浅色主题（变更申请 CR-01，不提供主题切换）。</div>
+      </div>
+      <div class="card">
+        <h2>注销账号</h2>
+        <div class="sub">注销将级联删除你的全部个人文档、向量、会话与反馈，且不可恢复。</div>
+        <button class="btn danger" id="btnZx">注销账号</button>
+      </div>
+    </section>
+
+    <!-- PG-06 关于 -->
+    <section id="pg06" class="hide">
+      <div class="card">
+        <h2>关于 · 校答</h2>
+        <div class="sub">校园知识库助手</div>
+        <p>上传校园文档，提问即得答案，答案附原文出处。</p>
+        <h2 style="margin-top:20px">数据使用说明</h2>
+        <p class="note" style="margin:0">检索到的片段会发送给大模型 API 用于生成答案；文本向量化在本机完成，向量不出本机。</p>
+        <h2 style="margin-top:20px">日志与保留</h2>
+        <p class="note" style="margin:0">问答日志不关联用户身份，保留 90 天后自动清理。你可随时注销账号并删除全部个人数据。</p>
+        <h2 style="margin-top:20px">联系方式</h2>
+        <p class="note" style="margin:0">学生工作处 0597-0000000（来自 <code>knowledge_base.yaml</code>）</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+  let isAdmin = false, logged = false;
+
+  // 登录守卫
+  function showLogin(){ logged=false; $('#pg01').classList.remove('hide'); $('#shell').classList.add('hide'); $('#roleTag').textContent='未登录'; }
+  function showApp(){ logged=true; $('#pg01').classList.add('hide'); $('#shell').classList.remove('hide'); $('#roleTag').textContent = isAdmin ? '管理员 admin' : '普通用户 user'; $('#navAdmin').classList.toggle('hide', !isAdmin); go('pg02'); }
+  function go(id){
+    if(!logged){ showLogin(); return; }
+    $$('.main > section').forEach(s => s.classList.toggle('hide', s.id !== id));
+    $$('.side button').forEach(b => b.classList.toggle('active', b.dataset.pg === id));
+    window.scrollTo(0,0);
+  }
+
+  $('#doLogin').addEventListener('click', () => {
+    const u = $('#lgUser').value.trim(), p = $('#lgPwd').value;
+    if(!u || !p){ $('#lgErr').textContent = '请输入用户名和密码'; return; }
+    $('#lgErr').textContent = '';
+    showApp();
+  });
+
+  const toReg = $('#toRegister'), toLogin = $('#toLogin');
+  toReg.addEventListener('click', () => { $('#loginForm').classList.add('hide'); $('#regForm').classList.remove('hide'); });
+  toLogin.addEventListener('click', () => { $('#regForm').classList.add('hide'); $('#loginForm').classList.remove('hide'); });
+
+  $('#rgAgree').addEventListener('change', e => {
+    $('#doRegister').disabled = !e.target.checked;   // 未勾选协议不可注册（FR-28）
+  });
+  $('#doRegister').addEventListener('click', () => {
+    const u = $('#rgUser').value.trim(), p = $('#rgPwd').value, p2 = $('#rgPwd2').value;
+    if(!u){ $('#rgErr').textContent = '用户名不能为空'; return; }
+    if(p.length < 6){ $('#rgErr').textContent = '密码至少 6 位'; return; }
+    if(p !== p2){ $('#rgErr').textContent = '两次输入的密码不一致'; return; }
+    $('#rgErr').textContent = ''; showApp();
+  });
+
+  $('#adminToggle').addEventListener('click', () => {
+    isAdmin = !isAdmin;
+    $('#adminToggle').textContent = '切换角色：' + (isAdmin ? '管理员' : '普通用户');
+    if(logged){ $('#roleTag').textContent = isAdmin ? '管理员 admin' : '普通用户 user'; $('#navAdmin').classList.toggle('hide', !isAdmin); if(!isAdmin && !$('#pg04').classList.contains('hide')) go('pg02'); }
+    else { $('#lgUser').value = isAdmin ? 'admin' : ''; }
+  });
+
+  $$('.side button').forEach(b => b.addEventListener('click', () => go(b.dataset.pg)));
+
+  // 引用卡片展开
+  $('#citeHd').addEventListener('click', () => $('#citeFull').classList.toggle('hide'));
+
+  // 反馈按钮
+  [['#fbUp','#fbDown'],['#fbDown','#fbUp']].forEach(([a,b]) => {
+    $(a).addEventListener('click', () => { $(a).classList.add('on'); $(b).classList.remove('on'); });
+  });
+
+  // 复制 / 导出
+  $('#btnCopy').addEventListener('click', () => { $('#btnCopy').textContent = '已复制'; setTimeout(()=>$('#btnCopy').textContent='复制答案',1200); });
+  $('#btnExport').addEventListener('click', () => {
+    const md = '# 会话导出 · 搬宿舍流程\n\n**我**：搬宿舍需要提前申请吗？\n\n**校答**：需要提前 3 个工作日向辅导员提交申请。【来源1】\n\n> 来源1 · 宿舍搬迁通知（相似度 0.82）\n';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([md], {type:'text/markdown'}));
+    a.download = '会话-搬宿舍流程.md'; a.click();
+  });
+
+  // 提问：演示拒答与降级
+  $('#btnAsk').addEventListener('click', () => {
+    const q = $('#askInput').value.trim();
+    if(!q){ return; }
+    const bubbles = $('.bubbles');
+    const me = document.createElement('div');
+    me.className = 'msg me'; me.innerHTML = '<div class="who">我</div><div class="body">'+q.replace(/</g,'&lt;')+'</div>';
+    bubbles.insertBefore(me, $('.composer'));
+    const ai = document.createElement('div');
+    ai.className = 'msg ai';
+    const isOutside = /外星人|不存在|火星/.test(q);
+    ai.innerHTML = '<div class="who">校答</div><div class="body '+(isOutside?'refuse':'')+'">'+
+      (isOutside ? '知识库中暂无相关资料，建议咨询学生工作处。' : '（演示占位）该问题的答案会基于检索到的资料生成，并在下方附上来源卡片与相似度分数。')+'</div>';
+    bubbles.insertBefore(ai, $('.composer'));
+    $('#askInput').value = '';
+    ai.scrollIntoView({behavior:'smooth', block:'nearest'});
+  });
+  $('#askInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('#btnAsk').click(); });
+
+  // 上传 / 进度 / 重试
+  $('#btnUpload').addEventListener('click', () => { $('#upHint').textContent = '已建 2 个入库任务（演示）；单文件失败不影响同批其他文件。'; });
+  $('#btnRetry').addEventListener('click', () => {
+    const bar = $('#retryBar'), row = $('#btnRetry').closest('tr');
+    bar.style.width = '30%';
+    setTimeout(()=>bar.style.width='78%',600);
+    setTimeout(()=>{ bar.style.width='100%'; row.children[2].textContent='完成 · 96 切片'; row.children[2].className='ok'; $('#btnRetry').disabled = true; },1400);
+  });
+
+  // 管理员页签
+  $$('.tabs button').forEach(b => b.addEventListener('click', () => {
+    $$('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+    $('#tabPub').classList.toggle('hide', b.dataset.tab !== 'pub');
+    $('#tabUsr').classList.toggle('hide', b.dataset.tab !== 'usr');
+  }));
+
+  // 注销二次确认
+  $('#btnZx').addEventListener('click', () => {
+    const mask = document.createElement('div'); mask.className = 'mask';
+    mask.innerHTML = '<div class="modal"><h3>确认注销账号？</h3>'+
+      '<p class="note">将级联删除你的全部个人文档、向量、会话与反馈，且不可恢复。</p>'+
+      '<label class="note"><input type="checkbox" id="zxAgree"> 我已知晓数据不可恢复</label>'+
+      '<div class="row" style="margin-top:16px;justify-content:flex-end"><button class="btn ghost" id="zxNo">取消</button><button class="btn danger" id="zxYes" disabled>确认注销</button></div></div>';
+    document.body.appendChild(mask);
+    mask.querySelector('#zxAgree').addEventListener('change', e => mask.querySelector('#zxYes').disabled = !e.target.checked);
+    mask.querySelector('#zxNo').addEventListener('click', () => mask.remove());
+    mask.querySelector('#zxYes').addEventListener('click', () => { mask.remove(); showLogin(); $('#lgUser').value=''; $('#lgPwd').value=''; });
+  });
+
+  showLogin();
+})();
+</script>
+</body>
+</html>

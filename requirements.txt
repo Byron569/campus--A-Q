@@ -1,0 +1,31 @@
+# ========== RAG 编排 ==========
+langchain>=0.3,<0.4
+langchain-core>=0.3
+langchain-community>=0.3
+langchain-openai>=0.2
+langchain-text-splitters>=0.3
+langchain-chroma>=0.1
+chromadb>=0.5
+
+# ========== 向量化（本地 BGE）==========
+langchain-huggingface>=0.1
+sentence-transformers>=3.0
+
+# ========== 关键词检索（BM25 + 中文分词）==========
+rank-bm25>=0.2.2
+jieba>=0.42.1
+
+# ========== 文档解析 ==========
+pypdf>=4.3
+python-docx>=1.1
+
+# ========== 配置 ==========
+pydantic-settings>=2.4
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# ========== 前端 ==========
+streamlit>=1.38
+
+# ========== 测试 ==========
+pytest>=8.0
