@@ -181,7 +181,7 @@ def test_defaults_match_design_document(tmp_path: Path) -> None:
     assert settings.embedding_provider == "local"
     assert settings.embedding_model == "BAAI/bge-small-zh-v1.5"
     assert settings.retrieve_top_k == 5
-    assert settings.retrieve_score_threshold == 0.35
+    assert settings.retrieve_score_threshold == 0.6
     assert settings.vector_weight == 0.6
     assert settings.bm25_weight == 0.4
     assert settings.history_rounds == 5

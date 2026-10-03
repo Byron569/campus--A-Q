@@ -70,7 +70,9 @@ class Settings(BaseSettings):
 
     # ---- 检索 ----
     retrieve_top_k: int = 5
-    retrieve_score_threshold: float = 0.35
+    # 只作用于向量路的相似度阈值（DR-01）。CR-02：由 0.35 上调至 0.6——
+    # M1 实测库外问题 top-1 相似度已达 0.42~0.60，0.35 完全不起过滤作用
+    retrieve_score_threshold: float = 0.6
     vector_weight: float = 0.6
     bm25_weight: float = 0.4
 
