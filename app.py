@@ -20,7 +20,7 @@ from config.settings import get_settings
 from src.ingest.tasks import recover_stale_tasks
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import documents
+from src.ui import documents, theme
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,8 @@ def _configure_logging() -> None:
 def main() -> None:
     _configure_logging()
     st.set_page_config(page_title="校答 · 文档管理", layout="wide")
+    # 注入设计令牌与控件覆盖（docs/07 §8），必须早于页面内容渲染
+    theme.apply_theme()
 
     bootstrap()
     documents.render(settings=get_settings(), store=get_vector_store())

@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 import time
@@ -280,20 +281,32 @@ def delete_document(doc_id: int, *, store: VectorStore, settings: Settings) -> N
 
 
 # ==================== 页面渲染 ====================
+#
+# 视觉按 docs/07-设计令牌.md 落地：面板 + 1px 描边 + 14px 圆角 + 无阴影，
+# 状态用胶囊标签（模板 .status-chip），按钮为胶囊形。样式本体在 src/ui/theme.py。
+
+
+def _panel_head(title: str, subtitle: str = "") -> None:
+    """面板标题行，对应模板 data-table 的 .panel .head。"""
+    sub = f'<span class="cqa-sub">{subtitle}</span>' if subtitle else ""
+    st.markdown(
+        f'<div class="cqa-panel-head" style="border:0;padding:0 0 10px">'
+        f"<h3>{title}</h3>{sub}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render(*, settings: Settings, store: VectorStore) -> None:
     """渲染整个文档管理页。"""
-    st.subheader("文档管理")
-    st.caption(
-        "当前版本尚未提供登录（认证在 M3），本页上传的文件按**公共文档**入库，"
-        "所有用户均可检索到。"
+    st.markdown('<div class="cqa-page-title">文档管理</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="cqa-page-desc">当前版本尚未提供登录（认证在 M3），'
+        "本页上传的文件按公共文档入库，所有用户均可检索到。</div>",
+        unsafe_allow_html=True,
     )
 
     _render_upload(settings=settings, store=store)
-    st.divider()
     _render_progress(settings=settings)
-    st.divider()
     _render_list(settings=settings, store=store)
 
     # 必须放在最后：进度轮询结束时还会 st.rerun() 一次，若在它之前渲染，
@@ -302,11 +315,14 @@ def render(*, settings: Settings, store: VectorStore) -> None:
 
 
 def _render_upload(*, settings: Settings, store: VectorStore) -> None:
+    suffix_hint = " / ".join(sorted(s.lstrip(".").upper() for s in ALLOWED_SUFFIXES))
+    _panel_head("上传文档", f"支持 {suffix_hint}，单文件不超过 {settings.max_upload_mb}MB，可多选")
+
     # 公共文档必须指定分类（docs/02 §4.10），因此不提供「未分类」选项
     options = [item for item in category_options() if item["key"] != UNCATEGORIZED_KEY]
     label_to_key = {item["name"]: item["key"] for item in options}
 
-    left, right = st.columns([3, 1])
+    left, right = st.columns([3, 2])
     with left:
         files = st.file_uploader(
             "选择要入库的文件（可多选）",
@@ -317,8 +333,9 @@ def _render_upload(*, settings: Settings, store: VectorStore) -> None:
         picked = st.selectbox(
             "分类（必选）", list(label_to_key), index=None, placeholder="请选择分类"
         )
+        start = st.button("开始上传", type="primary")
 
-    if not st.button("开始上传", type="primary"):
+    if not start:
         return
 
     if not files:
@@ -407,7 +424,8 @@ def _render_progress(*, settings: Settings) -> None:
     if not active:
         return
 
-    st.markdown("**入库进度**")
+    st.markdown('<div class="cqa-panel-head" style="border:0;padding:16px 0 6px"><h3>入库进度</h3></div>',
+                unsafe_allow_html=True)
     bars = {task.id: st.progress(task.progress, text=_progress_text(task)) for task in active}
 
     # 轮询直到本批任务全部结束，再刷新页面让列表显示最终状态。
@@ -444,6 +462,26 @@ def _progress_text(task) -> str:
     )
 
 
+def _status_chip(document, task) -> str:
+    """状态胶囊。对应模板 .status-chip 的四种语义。"""
+    if task is None:
+        # 命令行入库（ingest_cli.py）不建 ingest_tasks 记录，
+        # 这类文档只要已有切片就说明入库成功，不能标成「未入库」
+        if document.chunk_count > 0:
+            return '<span class="cqa-chip cqa-chip--ok">已入库</span>'
+        return '<span class="cqa-chip cqa-chip--wait">未入库</span>'
+
+    label = STATUS_LABELS.get(task.status, task.status)
+    counts = f" {task.done_chunks}/{task.total_chunks}"
+    if task.status == TASK_DONE:
+        return f'<span class="cqa-chip cqa-chip--ok">已完成{counts}</span>'
+    if task.status == TASK_RUNNING:
+        return f'<span class="cqa-chip cqa-chip--run">入库中{counts}</span>'
+    if task.status == TASK_FAILED:
+        return '<span class="cqa-chip cqa-chip--fail">失败</span>'
+    return f'<span class="cqa-chip cqa-chip--wait">{label}{counts}</span>'
+
+
 def _render_list(*, settings: Settings, store: VectorStore) -> None:
     """文档列表：分页、状态、失败原因、删除、重试。"""
     page = int(st.session_state.get(STATE_PAGE, 1))
@@ -455,49 +493,66 @@ def _render_list(*, settings: Settings, store: VectorStore) -> None:
 
     header, nav = st.columns([3, 2])
     with header:
-        st.markdown(f"**文档列表（共 {total} 条）**")
+        _panel_head("文档列表", f"共 {total} 条 · 每页 {page_size} 条")
     with nav:
         prev_col, page_col, next_col = st.columns([1, 2, 1])
-        if prev_col.button("上一页", disabled=page <= 1 or not rows):
+        if prev_col.button("上一页", disabled=page <= 1 or not rows, key="page-prev"):
             st.session_state[STATE_PAGE] = max(page - 1, 1)
             st.rerun()
-        page_col.markdown(f"<div style='text-align:center'>第 {page} / {total_pages} 页</div>", unsafe_allow_html=True)
-        if next_col.button("下一页", disabled=page >= total_pages or not rows):
+        page_col.markdown(
+            f'<div class="cqa-pager">第 {page} / {total_pages} 页</div>',
+            unsafe_allow_html=True,
+        )
+        if next_col.button("下一页", disabled=page >= total_pages or not rows, key="page-next"):
             st.session_state[STATE_PAGE] = page + 1
             st.rerun()
 
     if not rows:
-        st.info("还没有文档，上传学生手册或通知试试。")
+        st.markdown(
+            '<div class="cqa-panel"><div class="cqa-empty">'
+            "还没有文档，上传学生手册或通知试试。</div></div>",
+            unsafe_allow_html=True,
+        )
         return
 
     for document in rows:
         _render_row(document, settings=settings, store=store)
 
 
+def _row_html(document, task) -> str:
+    """一行列表的 HTML：文件徽标 + 名称/元信息 + 状态胶囊。
+
+    行边框由自有 .cqa-row 画，不用 st.container(border=True)——后者的边框写在
+    随 Streamlit 版本变化的 emotion 类上，改版就会静默失效（见 theme.py 注释）。
+    文件名来自用户上传，必须转义后再拼进 HTML。
+    """
+    name = html.escape(document.filename)
+    badge = html.escape((document.filetype or "?").upper()[:4])
+    meta = (
+        f"{html.escape(document.category)} · {document.size_bytes / 1024:.0f} KB · "
+        f"{document.chunk_count} 个切片"
+    )
+    return (
+        f'<div class="cqa-row">'
+        f'<div class="cqa-fileicon">{badge}</div>'
+        f'<div class="cqa-rowmain"><div class="cqa-name">{name}</div>'
+        f'<div class="cqa-meta">{meta}</div></div>'
+        f'<div class="cqa-rowstatus">{_status_chip(document, task)}</div>'
+        f"</div>"
+    )
+
+
 def _render_row(document, *, settings: Settings, store: VectorStore) -> None:
     """一行文档：信息 + 状态 + 失败原因 + 重试 / 删除。"""
     task = get_task_by_doc(document.id, db_path=settings.database_path)
 
-    name_col, meta_col, status_col, action_col = st.columns([4, 2, 3, 2])
-    with name_col:
-        st.markdown(f"**{document.filename}**")
-        st.caption(f"{document.filetype or '—'} · {document.size_bytes / 1024:.0f} KB")
-    with meta_col:
-        st.caption(f"分类：{document.category}")
-        st.caption(f"切片：{document.chunk_count}")
+    info_col, action_col = st.columns([7, 3])
 
-    with status_col:
-        if task is None:
-            # 命令行入库（ingest_cli.py）不建 ingest_tasks 记录，
-            # 这类文档只要已有切片就说明入库成功，不能标成「未入库」
-            label = "已入库" if document.chunk_count > 0 else "未入库"
-            st.caption(f"状态：{label}")
-        else:
-            label = STATUS_LABELS.get(task.status, task.status)
-            st.caption(f"状态：{label}（{task.done_chunks}/{task.total_chunks}）")
-            if task.status == TASK_FAILED and task.error:
-                # PG-03 要求悬停展示失败原因；Streamlit 列表无悬停提示，改为行内展示
-                st.error(task.error)
+    with info_col:
+        st.markdown(_row_html(document, task), unsafe_allow_html=True)
+        if task is not None and task.status == TASK_FAILED and task.error:
+            # PG-03 要求悬停展示失败原因；Streamlit 列表无悬停提示，改为行内展示
+            st.error(task.error)
 
     with action_col:
         retry_col, delete_col = st.columns(2)
@@ -509,7 +564,11 @@ def _render_row(document, *, settings: Settings, store: VectorStore) -> None:
                 except CampusQAError as exc:
                     st.error(str(exc))
         with delete_col.popover("删除"):
-            st.caption(f"确认删除《{document.filename}》？原文与向量一并清除，不可恢复。")
+            st.markdown(
+                f'<div class="cqa-page-desc">确认删除《{html.escape(document.filename)}》？'
+                "原文与向量一并清除，不可恢复。</div>",
+                unsafe_allow_html=True,
+            )
             if st.button("确认删除", key=f"delete-{document.id}", type="primary"):
                 try:
                     delete_document(document.id, store=store, settings=settings)

@@ -1,0 +1,20 @@
+[theme]
+# 设计依据：docs/07-设计令牌.md §8.1
+# 仅浅色模式（变更申请 CR-01，客户裁决），不提供主题切换
+base = "light"
+primaryColor = "#0065fd"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eff1f4"
+textColor = "#0e1115"
+font = "sans serif"
+
+[server]
+address = "0.0.0.0"
+port = 8501
+# 注意：这里要比业务上限（MAX_UPLOAD_MB=20）宽，给业务层留出校验空间。
+# Streamlit 会在上传阶段就拦掉超限文件，根本不进我们的代码；若设成 20，
+# 用户看到的是「整批上传失败」，违反 FR-05「单文件失败不影响同批」（DR-03）。
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false
