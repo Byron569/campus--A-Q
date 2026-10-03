@@ -23,6 +23,7 @@ from src.auth.service import (
     validate_username,
 )
 from src.errors import AccountDisabled, AuthError, PermissionDenied, UsernameTaken
+from src.rag.retriever import build_retriever
 from src.repository import (
     USER_ROLE_ADMIN,
     User,
@@ -339,3 +340,33 @@ def test_delete_account_aborts_before_touching_database(
 def test_delete_account_rejects_missing_user(db: Path, store, settings) -> None:
     with pytest.raises(AuthError, match="账号不存在"):
         service.delete_account(999, store=store, settings=settings)
+
+
+# ==================== M3-14：跨用户隔离（链路层）====================
+
+
+def test_m3_14_retriever_cannot_reach_other_users_documents(store, settings) -> None:
+    """用户 A（id=1）走完整检索链路，也拿不到用户 B（id=2）的个人资料。
+
+    TC-U16 只盯向量库这一层；这里补链路层——BM25 路走的是 `list_chunks`，
+    它同样必须按 user_id 过滤，否则关键词一侧会漏数据，而只测 `search` 是查不出来的。
+    """
+    store.add_chunks([("B 同学的私人笔记：编译原理重点整理。", build_metadata(
+        doc_id=100, user_id=2, is_public=False, category="uncategorized",
+        filename="B的笔记.pdf", chunk_index=0,
+    ))])
+    store.add_chunks([("学校公共通知：机房开放时间调整。", build_metadata(
+        doc_id=200, user_id=None, is_public=True, category="admin",
+        filename="公共通知.pdf", chunk_index=0,
+    ))])
+
+    # A 与匿名用户都检索不到 B 的资料
+    for identity in (1, None):
+        hits = build_retriever(identity, store=store, settings=settings).search(
+            "编译原理重点整理"
+        )
+        assert all(hit.doc_id != 100 for hit in hits), f"user_id={identity} 越权命中 B 的资料"
+
+    # 资料主人自己能检索到，排除「因为匹配不上才没有」的假阳性
+    owner_hits = build_retriever(2, store=store, settings=settings).search("编译原理重点整理")
+    assert any(hit.doc_id == 100 for hit in owner_hits)

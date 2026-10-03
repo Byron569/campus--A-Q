@@ -4,8 +4,8 @@
 
 范围说明：本模块按「用到才写」推进。Sprint 1 实现了 documents 与 ingest_tasks
 （M1-11）；FB-2.2 的问答主链路落库需要，补齐 conversations / messages /
-message_sources / qa_metrics 的写入与读取。会话的切换 / 重命名 / 删除（M2-06）
-与 feedback、metrics 清理（M2-05 / M3-08）仍留到各自功能块，避免提前造无人调用的代码。
+message_sources / qa_metrics 的写入与读取；M2-06 补会话切换 / 重命名 / 删除，
+M2-05 补 feedback；M3-08 补 `cleanup_metrics` 日志清理。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
+from config.settings import METRICS_RETENTION_DAYS
 from src.store.db import get_conn, retry_on_write_lock
 
 if TYPE_CHECKING:  # 仅用于类型标注，避免数据访问层反向依赖向量层
@@ -822,3 +823,21 @@ def add_metric(
                 1 if degraded else 0,
             ),
         )
+
+
+@retry_on_write_lock
+def cleanup_metrics(
+    days: int = METRICS_RETENTION_DAYS, db_path: PathLike = None
+) -> int:
+    """删除超过保留期的问答指标，返回删除条数（M3-08，docs/02 §6.3）。
+
+    时间基准必须在同一侧：`created_at` 由 SQLite 以本地时间写入
+    （`datetime('now','localtime')`），这里也用 SQLite 的时间函数算出阈值再比较，
+    不能拿 Python 的 `datetime.now()` 去比，否则时区一错就整片误删或整片漏删。
+    """
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "DELETE FROM qa_metrics WHERE created_at < datetime('now', 'localtime', ?)",
+            (f"-{days} days",),
+        )
+        return cursor.rowcount

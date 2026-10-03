@@ -32,7 +32,7 @@ import streamlit as st
 from config.settings import get_settings, load_kb_config
 from src.auth import service
 from src.ingest.tasks import recover_stale_tasks
-from src.repository import User, get_user
+from src.repository import User, cleanup_metrics, get_user
 from src.store.chroma import VectorStore
 from src.store.db import init_db
 from src.ui import about, admin, chat, documents, login, theme
@@ -71,7 +71,15 @@ def bootstrap() -> None:
     # 后台线程实现异步入库，进程重启会丢失运行中的任务，
     # 这里把残留的 running 统一置为 failed，列表中即可手动重试（docs/02 §11）
     recovered = recover_stale_tasks()
-    logger.info("启动完成：数据目录 %s，回收中断任务 %d 条", settings.data_dir, recovered)
+    # M3-08：清理超过保留期的问答指标（docs/02 §6.3）。没有定时任务组件，
+    # 就借启动钩子做，随每次部署自然执行一次。
+    purged = cleanup_metrics()
+    logger.info(
+        "启动完成：数据目录 %s，回收中断任务 %d 条，清理过期指标 %d 条",
+        settings.data_dir,
+        recovered,
+        purged,
+    )
 
 
 @st.cache_resource

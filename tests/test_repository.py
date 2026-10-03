@@ -26,6 +26,7 @@ from src.repository import (
     add_message,
     add_metric,
     add_sources,
+    cleanup_metrics,
     create_conversation,
     create_document,
     create_task,
@@ -631,6 +632,27 @@ def test_add_metric_marks_refusal_and_degradation(db: Path) -> None:
 
     assert [row["answerable"] for row in rows] == [0, 1]
     assert [row["degraded"] for row in rows] == [0, 1]
+
+
+def test_tc_u20_cleanup_removes_only_expired_metrics(db: Path) -> None:
+    """TC-U20（M3-08）：只删 90 天前的记录，保留期内的原样保留。"""
+    add_metric(question_len=5, answerable=True, db_path=db)  # 刚写入，应保留
+    with get_conn(db) as conn:
+        conn.execute(
+            """
+            INSERT INTO qa_metrics (question_len, answerable, created_at)
+            VALUES (?, ?, datetime('now', 'localtime', '-91 days'))
+            """,
+            (5, 0),
+        )
+
+    removed = cleanup_metrics(days=90, db_path=db)
+
+    with get_conn(db) as conn:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM qa_metrics")]
+
+    assert removed == 1
+    assert [row["answerable"] for row in rows] == [1]
 
 
 # ==================== feedback ====================
