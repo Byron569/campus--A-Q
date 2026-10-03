@@ -204,6 +204,37 @@ def test_search_category_filter_limits_results(store: VectorStore) -> None:
     assert all(h.category == "admin" for h in hits)
 
 
+# ==================== 语料列举（BM25 路用）====================
+
+
+def test_list_chunks_respects_permission_filter(store: VectorStore) -> None:
+    """`list_chunks` 与 `search` 走同一套权限过滤（FR-31）。"""
+    add(store, "公共通知", doc_id=1, is_public=True)
+    add(store, "我的笔记", doc_id=2, user_id=1)
+    add(store, "别人的笔记", doc_id=3, user_id=2)
+
+    assert {hit.doc_id for hit in store.list_chunks(user_id=1)} == {1, 2}
+    assert {hit.doc_id for hit in store.list_chunks(user_id=None)} == {1}
+
+    listed = store.list_chunks(user_id=1)
+    assert all(hit.score is None for hit in listed)  # 无语义相似度可言
+    assert [hit.doc_id for hit in listed] == [1, 2]  # 顺序稳定
+
+
+def test_list_chunks_supports_category_filter(store: VectorStore) -> None:
+    add(store, "新生事务说明", doc_id=1, is_public=True, category="freshman")
+    add(store, "行政事务说明", doc_id=2, is_public=True, category="admin")
+
+    hits = store.list_chunks(user_id=None, category="admin")
+
+    assert {hit.doc_id for hit in hits} == {2}
+
+
+def test_list_chunks_requires_user_id(store: VectorStore) -> None:
+    with pytest.raises(TypeError):
+        store.list_chunks()  # type: ignore[call-arg]
+
+
 # ==================== 删除 ====================
 
 

@@ -171,6 +171,46 @@ class VectorStore:
 
         return hits
 
+    def list_chunks(
+        self,
+        *,
+        user_id: int | None,
+        category: str | None = None,
+    ) -> list[SearchHit]:
+        """列出该身份可访问的**全部**切片，供 BM25 路构建关键词索引（docs/02 §4.3）。
+
+        与 `search` 走同一套权限过滤（FR-31），`user_id` 同样必传：这里没有相似度
+        可言，故 `score=None`；不做阈值过滤（阈值只作用于向量路，DR-01）。
+        上层不得绕过本方法去读 Chroma。
+        """
+        where = self._build_filter(user_id, category)
+
+        try:
+            data = self._store.get(where=where)
+        except Exception as exc:
+            logger.error("读取检索语料失败：%s", exc)
+            raise
+
+        documents = data.get("documents") or []
+        metadatas = data.get("metadatas") or []
+
+        hits: list[SearchHit] = []
+        for text, metadata in zip(documents, metadatas):
+            info = metadata or {}
+            hits.append(
+                SearchHit(
+                    text=text,
+                    score=None,
+                    filename=str(info.get("filename", "")),
+                    doc_id=int(info.get("doc_id", -1)),
+                    chunk_index=int(info.get("chunk_index", -1)),
+                    category=str(info.get("category", "")),
+                )
+            )
+        # 固定顺序，保证 BM25 打分与融合结果可复现
+        hits.sort(key=lambda hit: (hit.doc_id, hit.chunk_index))
+        return hits
+
     # ---------------- 删除 ----------------
 
     def delete_by_doc_id(self, doc_id: int) -> int:
