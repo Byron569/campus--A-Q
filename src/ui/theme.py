@@ -424,6 +424,30 @@ COMPONENTS = """
   text-align: center; color: var(--muted-foreground); font-size: 13px;
 }
 
+/* ---------- 日程页（二期 2.3）---------- */
+
+/* 站内提醒条：--accent 高亮 + 1px 描边（不抢主内容的视觉焦点） */
+.cqa-remind {
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--accent) 42%, var(--card));
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+.cqa-remind-head { font-size: 13px; font-weight: 600; color: var(--accent-foreground); margin-bottom: 6px; }
+.cqa-remind-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 3px 0; font-size: 13px;
+}
+.cqa-remind-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cqa-remind-due { flex: none; color: var(--destructive); font-size: 12px; }
+
+/* 日程分组小标题 */
+.cqa-group-head {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 12px; font-weight: 600; color: var(--muted-foreground);
+}
+
 /* 侧边栏（对应模板 sidebar-nav）
    导航改用 Streamlit 按钮实现，**不再是 <a>**：链接跳转会重建 Streamlit 会话，
    把存在会话里的登录态一并丢掉（FB-3.2 浏览器实测的缺陷）。

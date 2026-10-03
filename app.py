@@ -35,7 +35,7 @@ from src.ingest.tasks import recover_stale_tasks
 from src.repository import User, cleanup_metrics, get_user
 from src.store.chroma import VectorStore
 from src.store.db import init_db
-from src.ui import about, admin, chat, documents, login, theme
+from src.ui import about, admin, chat, documents, login, schedule, theme
 from src.ui import settings as ui_settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ QUERY_KEY = "page"
 PAGES = (
     {"key": "qa", "label": "问答", "icon": ":material/forum:", "plan": ""},
     {"key": "documents", "label": "我的文档", "icon": ":material/description:", "plan": ""},
+    {"key": "schedule", "label": "日程", "icon": ":material/event_note:", "plan": ""},
     {
         "key": "admin",
         "label": "管理员",
@@ -217,10 +218,15 @@ def main() -> None:
 
     render_sidebar(current, user=user)
 
+    # 站内日程提醒：统一在内容区顶部渲染，任何页面「打开 / 刷新」都能看到
+    schedule.render_reminder(settings=settings, user=user)
+
     if current == "qa":
         chat.render(settings=settings, store=get_vector_store(), user=user)
     elif current == "documents":
         documents.render(settings=settings, store=get_vector_store(), user=user)
+    elif current == "schedule":
+        schedule.render(settings=settings, user=user)
     elif current == "admin":
         admin.render(settings=settings, store=get_vector_store(), user=user)
     elif current == "settings":

@@ -19,23 +19,23 @@ from src.repository import (
 )
 from src.ui import login
 
-# 截至 M3 已实现的页面：问答（M2-05）、我的文档（M1-18）、管理员（M3-04）、
-# 设置（M3-16）、关于（M3-17）——五个页面全部交付
-IMPLEMENTED_PAGES = {"qa", "documents", "admin", "settings", "about"}
+# 截至二期 2.3 已实现的页面：问答（M2-05）、我的文档（M1-18）、
+# 日程（二期 2.3，冻结基线外新增）、管理员（M3-04）、设置（M3-16）、关于（M3-17）
+IMPLEMENTED_PAGES = {"qa", "documents", "schedule", "admin", "settings", "about"}
 
 
-def test_navigation_has_the_five_designed_entries() -> None:
-    """docs/05 §G-03：导航为 PG-02~PG-06 五页共用，顺序与原型一致。"""
+def test_navigation_entries_match_design() -> None:
+    """导航项与顺序：一期 PG-02~PG-06 五页，加上二期新增的「日程」。"""
     assert [page["key"] for page in PAGES] == [
-        "qa", "documents", "admin", "settings", "about",
+        "qa", "documents", "schedule", "admin", "settings", "about",
     ]
     assert [page["label"] for page in PAGES] == [
-        "问答", "我的文档", "管理员", "设置", "关于",
+        "问答", "我的文档", "日程", "管理员", "设置", "关于",
     ]
 
 
 def test_every_nav_entry_has_an_icon() -> None:
-    """五个导航项各有图标，不能漏。
+    """各导航项都有图标，不能漏。
 
     图标实现由设计指定的 lucide 换成 Streamlit 的 Material（导航已改为按钮，
     按钮只接受 Material 图标），该差异见 FB-3.2 自审清单。

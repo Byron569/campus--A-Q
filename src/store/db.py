@@ -118,6 +118,22 @@ CREATE TABLE IF NOT EXISTS qa_metrics (
     degraded     INTEGER,
     created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    type        TEXT NOT NULL DEFAULT 'homework',
+    course      TEXT,
+    due_at      TEXT NOT NULL,
+    remind_days INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    note        TEXT,
+    reminded_at TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
 """
 
 INDEXES = """
@@ -130,6 +146,8 @@ CREATE INDEX IF NOT EXISTS idx_msg_conv         ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_src_msg          ON message_sources(message_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_msg     ON feedback(message_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_created  ON qa_metrics(created_at);
+CREATE INDEX IF NOT EXISTS idx_schedules_user   ON schedules(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_schedules_due    ON schedules(user_id, due_at);
 """
 
 

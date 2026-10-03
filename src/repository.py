@@ -297,7 +297,7 @@ def delete_user(user_id: int, db_path: PathLike = None) -> None:
     """删除账号在 SQLite 中的**全部**关联数据（FR-25，单事务）。
 
     顺序按外键依赖：feedback → message_sources → messages → conversations
-    → ingest_tasks → documents → users。
+    → ingest_tasks → documents → schedules → users。
 
     向量库与磁盘文件不在这里处理（数据访问层不碰向量层）——
     由 `auth.service.delete_account` 先清向量与文件、再调本函数，
@@ -337,6 +337,7 @@ def delete_user(user_id: int, db_path: PathLike = None) -> None:
         conn.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM ingest_tasks WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM documents WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM schedules WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
@@ -844,10 +845,198 @@ def cleanup_metrics(
         return cursor.rowcount
 
 
+# ==================== schedules（日程，二期 2.3）====================
+#
+# 全部为**个人数据**，只有本人可见（沿用 FR-31 的口径：日程不设公共可见）。
+# 任何查询都必须带 `user_id`，杜绝「读到别人日程」的可能。
+
+SCHEDULE_HOMEWORK = "homework"
+SCHEDULE_EXAM = "exam"
+SCHEDULE_OTHER = "other"
+SCHEDULE_TYPES = (SCHEDULE_HOMEWORK, SCHEDULE_EXAM, SCHEDULE_OTHER)
+
+SCHEDULE_PENDING = "pending"
+SCHEDULE_DONE = "done"
+
+# 允许通过 update_schedule 修改的字段白名单，防止调用方拼出非法列名
+_SCHEDULE_UPDATABLE = {"title", "type", "course", "due_at", "remind_days", "note"}
+
+
+@dataclass
+class Schedule:
+    id: int
+    user_id: int
+    title: str
+    type: str
+    course: str
+    due_at: str
+    remind_days: int
+    status: str
+    note: str
+    reminded_at: str | None
+    created_at: str
+    updated_at: str
+
+    @property
+    def is_done(self) -> bool:
+        return self.status == SCHEDULE_DONE
+
+
+def _to_schedule(row) -> Schedule:
+    return Schedule(
+        id=row["id"],
+        user_id=row["user_id"],
+        title=row["title"],
+        type=row["type"],
+        course=row["course"] or "",
+        due_at=row["due_at"],
+        remind_days=row["remind_days"] or 0,
+        status=row["status"],
+        note=row["note"] or "",
+        reminded_at=row["reminded_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+@retry_on_write_lock
+def create_schedule(
+    *,
+    user_id: int,
+    title: str,
+    due_at: str,
+    type: str = SCHEDULE_HOMEWORK,
+    course: str | None = None,
+    remind_days: int = 1,
+    note: str | None = None,
+    db_path: PathLike = None,
+) -> int:
+    """新建日程，返回 schedule_id。空课程 / 备注存 NULL，展示层再兜底。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO schedules (user_id, title, type, course, due_at, remind_days, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                title.strip(),
+                type,
+                (course or "").strip() or None,
+                due_at,
+                remind_days,
+                (note or "").strip() or None,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_schedule(schedule_id: int, db_path: PathLike = None) -> Schedule | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM schedules WHERE id = ?", (schedule_id,)
+        ).fetchone()
+    return _to_schedule(row) if row else None
+
+
+def list_schedules(
+    user_id: int, *, status: str | None = None, db_path: PathLike = None
+) -> list[Schedule]:
+    """列出某用户的日程，按截止时间升序。
+
+    `user_id` 必传：这是个人数据，漏传会变成「谁都能拿到全部日程」，
+    因此这里不提供「不传 user_id 即返回全部」的退化行为。
+    """
+    sql = "SELECT * FROM schedules WHERE user_id = ?"
+    params: list[object] = [user_id]
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    sql += " ORDER BY due_at ASC, id ASC"
+    with get_conn(db_path) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [_to_schedule(row) for row in rows]
+
+
+@retry_on_write_lock
+def update_schedule(schedule_id: int, *, db_path: PathLike = None, **fields) -> bool:
+    """更新日程字段（白名单校验）。空课程 / 备注归一为 NULL。"""
+    unknown = set(fields) - _SCHEDULE_UPDATABLE
+    if unknown:
+        raise ValueError(f"schedule 不支持的字段：{sorted(unknown)}")
+    if not fields:
+        return False
+
+    cleaned: dict[str, object] = {}
+    for name, value in fields.items():
+        if isinstance(value, str):
+            value = value.strip()
+        if name in ("course", "note"):
+            value = value or None
+        cleaned[name] = value
+
+    assignments = ", ".join(f"{name} = ?" for name in cleaned)
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            f"""
+            UPDATE schedules
+               SET {assignments}, updated_at = datetime('now','localtime')
+             WHERE id = ?
+            """,
+            (*cleaned.values(), schedule_id),
+        )
+        return cursor.rowcount > 0
+
+
+@retry_on_write_lock
+def set_schedule_status(
+    schedule_id: int, status: str, db_path: PathLike = None
+) -> bool:
+    """切换日程状态（pending / done）。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE schedules
+               SET status = ?, updated_at = datetime('now','localtime')
+             WHERE id = ?
+            """,
+            (status, schedule_id),
+        )
+        return cursor.rowcount > 0
+
+
+@retry_on_write_lock
+def mark_schedules_reminded(
+    schedule_ids: Sequence[int], db_path: PathLike = None
+) -> int:
+    """把若干日程标记为「已提醒」（写入 reminded_at），返回更新条数。"""
+    ids = [int(item) for item in schedule_ids]
+    if not ids:
+        return 0
+    placeholders = ", ".join("?" for _ in ids)
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            f"""
+            UPDATE schedules
+               SET reminded_at = datetime('now','localtime')
+             WHERE id IN ({placeholders})
+            """,
+            ids,
+        )
+        return int(cursor.rowcount)
+
+
+@retry_on_write_lock
+def delete_schedule(schedule_id: int, db_path: PathLike = None) -> bool:
+    with get_conn(db_path) as conn:
+        cursor = conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+        return cursor.rowcount > 0
+
+
 # ==================== 备份 / 恢复（FR-24，二期）====================
 #
 # 备份涉及的表与恢复顺序由外键依赖决定：users → documents → conversations
-# → messages → message_sources / feedback。
+# → messages → message_sources / feedback / schedules。
 # qa_metrics 是脱敏日志（90 天自动清理，可丢）、ingest_tasks 是瞬时状态，
 # 都不进备份。
 
@@ -858,6 +1047,7 @@ BACKUP_TABLES = (
     "messages",
     "message_sources",
     "feedback",
+    "schedules",
 )
 
 
