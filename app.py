@@ -155,8 +155,9 @@ def main() -> None:
     st.set_page_config(
         page_title="校答 · 校园知识库问答",
         layout="wide",
-        # 桌面端默认展开侧边栏；窄屏 Streamlit 仍会自动折叠（docs/05：手机端能用即可）
-        initial_sidebar_state="expanded",
+        # "auto"：桌面端默认展开；窄屏（手机）由 Streamlit 自动折叠，
+        # 否则 248px 的固定侧栏会挤掉大半内容区（M2 浏览器验收结论）
+        initial_sidebar_state="auto",
     )
     # 注入设计令牌与控件覆盖（docs/07 §8），必须早于页面内容渲染
     theme.apply_theme()

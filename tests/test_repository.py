@@ -286,6 +286,41 @@ def test_reset_task_reuses_same_record(db: Path) -> None:
     assert get_task_by_doc(doc_id, db_path=db).id == task_id
 
 
+# ---- CR-03：告警字段落库 ----
+
+WARNING_TEXT = "该文件疑似扫描件，建议后续启用 OCR"
+
+
+def test_update_task_persists_warning(db: Path) -> None:
+    """告警要落库，文档列表才显示得出「疑似扫描件」（CR-03）。"""
+    doc_id = make_doc(db)
+    task_id = create_task(doc_id, db_path=db)
+
+    update_task(task_id, db_path=db, status=TASK_DONE, warning=WARNING_TEXT)
+
+    task = get_task(task_id, db_path=db)
+    assert task.status == TASK_DONE
+    assert task.warning == WARNING_TEXT
+
+
+def test_reset_task_clears_warning(db: Path) -> None:
+    """重试后上一次的告警不能残留。"""
+    doc_id = make_doc(db)
+    task_id = create_task(doc_id, db_path=db)
+    update_task(task_id, db_path=db, status=TASK_DONE, warning=WARNING_TEXT)
+
+    reset_task(task_id, db_path=db)
+
+    task = get_task(task_id, db_path=db)
+    assert task.warning is None
+    assert task.error is None
+
+
+def test_task_without_warning_is_none(db: Path) -> None:
+    doc_id = make_doc(db)
+    assert get_task(create_task(doc_id, db_path=db), db_path=db).warning is None
+
+
 def test_list_tasks_by_user_pagination(db: Path) -> None:
     for index in range(5):
         create_task(make_doc(db, filename=f"{index}.pdf"), user_id=7, db_path=db)

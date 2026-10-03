@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
-from src.store.db import get_conn
+from src.store.db import get_conn, retry_on_write_lock
 
 if TYPE_CHECKING:  # 仅用于类型标注，避免数据访问层反向依赖向量层
     from src.store.chroma import SearchHit
@@ -37,7 +37,7 @@ TASK_DONE = "done"
 TASK_FAILED = "failed"
 
 # 允许通过 update_task 修改的字段白名单，防止调用方拼出非法列名
-_TASK_UPDATABLE = {"status", "total_chunks", "done_chunks", "error"}
+_TASK_UPDATABLE = {"status", "total_chunks", "done_chunks", "error", "warning"}
 
 
 @dataclass
@@ -64,6 +64,7 @@ class IngestTask:
     total_chunks: int
     done_chunks: int
     error: str | None
+    warning: str | None
     created_at: str
     updated_at: str
 
@@ -141,6 +142,7 @@ def _to_task(row) -> IngestTask:
         total_chunks=row["total_chunks"] or 0,
         done_chunks=row["done_chunks"] or 0,
         error=row["error"],
+        warning=row["warning"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -149,6 +151,7 @@ def _to_task(row) -> IngestTask:
 # ==================== documents ====================
 
 
+@retry_on_write_lock
 def create_document(
     *,
     filename: str,
@@ -234,6 +237,7 @@ def list_documents(
     return [_to_document(row) for row in rows], int(total)
 
 
+@retry_on_write_lock
 def soft_delete_document(doc_id: int, db_path: PathLike = None) -> bool:
     """软删除：置 status='deleted'。向量的清理由调用方负责（见 docs/02 §4.9）。"""
     with get_conn(db_path) as conn:
@@ -248,6 +252,7 @@ def soft_delete_document(doc_id: int, db_path: PathLike = None) -> bool:
         return cursor.rowcount > 0
 
 
+@retry_on_write_lock
 def update_chunk_count(doc_id: int, chunk_count: int, db_path: PathLike = None) -> None:
     with get_conn(db_path) as conn:
         conn.execute(
@@ -281,6 +286,7 @@ def exists_active_task(doc_id: int, db_path: PathLike = None) -> bool:
 # ==================== ingest_tasks ====================
 
 
+@retry_on_write_lock
 def create_task(doc_id: int, user_id: int | None = None, db_path: PathLike = None) -> int:
     with get_conn(db_path) as conn:
         cursor = conn.execute(
@@ -306,6 +312,7 @@ def get_task_by_doc(doc_id: int, db_path: PathLike = None) -> IngestTask | None:
     return _to_task(row) if row else None
 
 
+@retry_on_write_lock
 def update_task(task_id: int, db_path: PathLike = None, **fields) -> None:
     """更新任务字段，只允许白名单内的列。"""
     unknown = set(fields) - _TASK_UPDATABLE
@@ -328,6 +335,7 @@ def update_task(task_id: int, db_path: PathLike = None, **fields) -> None:
         )
 
 
+@retry_on_write_lock
 def reset_task(task_id: int, db_path: PathLike = None) -> None:
     """把任务重置为待执行，用于失败重试（DR-05：复用原任务，不新建记录）。"""
     with get_conn(db_path) as conn:
@@ -335,7 +343,7 @@ def reset_task(task_id: int, db_path: PathLike = None) -> None:
             """
             UPDATE ingest_tasks
                SET status = ?, total_chunks = 0, done_chunks = 0, error = NULL,
-                   updated_at = datetime('now','localtime')
+                   warning = NULL, updated_at = datetime('now','localtime')
              WHERE id = ?
             """,
             (TASK_PENDING, task_id),
@@ -372,6 +380,7 @@ def list_tasks_by_user(
     return [_to_task(row) for row in rows], int(total)
 
 
+@retry_on_write_lock
 def recover_stale_tasks(db_path: PathLike = None) -> int:
     """服务启动时，把残留的 running 任务标记为 failed。
 
@@ -397,6 +406,7 @@ def recover_stale_tasks(db_path: PathLike = None) -> int:
 # ==================== conversations / messages ====================
 
 
+@retry_on_write_lock
 def create_conversation(
     user_id: int, *, title: str | None = None, db_path: PathLike = None
 ) -> int:
@@ -438,6 +448,7 @@ def list_conversations(
     return [_to_conversation(row) for row in rows], int(total)
 
 
+@retry_on_write_lock
 def rename_conversation(
     conversation_id: int, title: str, db_path: PathLike = None
 ) -> bool:
@@ -454,6 +465,7 @@ def rename_conversation(
         return cursor.rowcount > 0
 
 
+@retry_on_write_lock
 def delete_conversation(conversation_id: int, db_path: PathLike = None) -> int:
     """删除会话及其全部消息、引用与反馈，返回删除的消息条数。
 
@@ -482,6 +494,7 @@ def delete_conversation(conversation_id: int, db_path: PathLike = None) -> int:
     return int(removed)
 
 
+@retry_on_write_lock
 def add_message(
     conversation_id: int, role: str, content: str, db_path: PathLike = None
 ) -> int:
@@ -532,6 +545,7 @@ def list_messages(
 # ==================== message_sources / qa_metrics ====================
 
 
+@retry_on_write_lock
 def add_sources(
     message_id: int, sources: Sequence["SearchHit"], db_path: PathLike = None
 ) -> None:
@@ -563,6 +577,7 @@ def list_sources_by_message(message_id: int, db_path: PathLike = None) -> list[d
 # ==================== feedback ====================
 
 
+@retry_on_write_lock
 def add_feedback(
     message_id: int, user_id: int, rating: str, db_path: PathLike = None
 ) -> bool:
@@ -589,6 +604,7 @@ def get_feedback(message_id: int, user_id: int, db_path: PathLike = None) -> str
     return row["rating"] if row else None
 
 
+@retry_on_write_lock
 def add_metric(
     *,
     question_len: int,

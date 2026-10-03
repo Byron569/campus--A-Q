@@ -95,7 +95,8 @@ def _run_ingest(
     db_path: Path | str | None,
 ) -> None:
     """后台线程主体：把结果写回 ingest_tasks，绝不把异常抛到主线程。"""
-    update_task(task_id, db_path=db_path, status=TASK_RUNNING, error=None)
+    # warning 一并清空：重试时上一次的告警不能留到这一次
+    update_task(task_id, db_path=db_path, status=TASK_RUNNING, error=None, warning=None)
 
     try:
         result = ingest_file(
@@ -119,8 +120,9 @@ def _run_ingest(
         update_task(task_id, db_path=db_path, status=TASK_FAILED, error=UNEXPECTED_ERROR_TEXT)
         return
 
-    update_task(task_id, db_path=db_path, status=TASK_DONE)
+    # 告警（如「疑似扫描件」）要落库，文档列表才能把它显示出来（CR-03）
+    update_task(
+        task_id, db_path=db_path, status=TASK_DONE, warning=result.warning or None
+    )
     if result.warning:
-        # 扫描件等告警：ingest_tasks 无告警字段，异步路径下只入日志
-        # （命令行同步入库会把 warning 打印出来）
         logger.warning("入库告警 doc_id=%s：%s", doc_id, result.warning)

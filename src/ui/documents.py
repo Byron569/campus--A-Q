@@ -553,6 +553,9 @@ def _render_row(document, *, settings: Settings, store: VectorStore) -> None:
         if task is not None and task.status == TASK_FAILED and task.error:
             # PG-03 要求悬停展示失败原因；Streamlit 列表无悬停提示，改为行内展示
             st.error(task.error)
+        if task is not None and task.status == TASK_DONE and task.warning:
+            # 入库告警（如「该文件疑似扫描件，建议后续启用 OCR」）随任务落库后行内展示
+            st.warning(task.warning)
 
     with action_col:
         retry_col, delete_col = st.columns(2)
