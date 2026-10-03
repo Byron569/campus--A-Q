@@ -34,8 +34,10 @@ EMBED_BATCH_SIZE = 32                    # 入库时每批向量化与更新进�
 PBKDF2_ITERATIONS = 200_000              # 密码哈希迭代次数
 METRICS_RETENTION_DAYS = 90              # 问答日志保留天数
 
-# 上传白名单（FR-05）
-ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
+# 上传白名单（FR-05）。图片后缀为二期 OCR 扩展（M6），是否放行还取决于
+# `Settings.ocr_enabled`——关掉 OCR 时图片会被明确拒绝，而不是入库后无内容。
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md"} | IMAGE_SUFFIXES
 # 疑为扫描件的判定阈值：平均每页可提取字符数低于该值（docs/02 §4.2）
 OCR_CHAR_THRESHOLD_PER_PAGE = 20
 
@@ -86,6 +88,10 @@ class Settings(BaseSettings):
     # ---- 上传 ----
     max_upload_mb: int = 20
     page_size: int = 10
+
+    # ---- OCR（二期 M6：图片与扫描件入库）----
+    # 关掉后图片后缀会被拒绝、扫描件 PDF 只保留「疑似扫描件」告警不入内容
+    ocr_enabled: bool = True
 
     # ---- 路径 ----
     data_dir: Path = PROJECT_ROOT / "data"

@@ -1,7 +1,10 @@
-"""文档解析：PDF / DOCX / TXT / MD → 原始文本段落。
+"""文档解析：PDF / DOCX / TXT / MD / 图片（OCR）→ 原始文本段落。
 
 设计依据：docs/02-架构设计.md §4.2
 异常约定：docs/02 §11 —— 后缀不支持抛 UnsupportedFileType；解析失败抛 ParseError。
+
+OCR（二期 M6）：图片直接识别；扫描件 PDF（pypdf 抽不出文字）逐页栅格化后识别。
+识别实现见 `src/ingest/ocr.py`。
 """
 
 from __future__ import annotations
@@ -11,7 +14,13 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from config.settings import ALLOWED_SUFFIXES, OCR_CHAR_THRESHOLD_PER_PAGE
+from config.settings import (
+    ALLOWED_SUFFIXES,
+    IMAGE_SUFFIXES,
+    OCR_CHAR_THRESHOLD_PER_PAGE,
+    Settings,
+    get_settings,
+)
 from src.errors import ParseError, UnsupportedFileType
 
 logger = logging.getLogger(__name__)
@@ -92,7 +101,7 @@ def _load_plain(path: Path) -> LoadResult:
     return LoadResult(sections=sections)
 
 
-def _load_pdf(path: Path) -> LoadResult:
+def _load_pdf(path: Path, *, settings: Settings) -> LoadResult:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover - 依赖缺失属环境问题
@@ -133,13 +142,50 @@ def _load_pdf(path: Path) -> LoadResult:
     if page_count:
         average = result.text_length / page_count
         if average < OCR_CHAR_THRESHOLD_PER_PAGE:
+            ocr_sections = _ocr_pdf(path, page_count, settings=settings)
+            if ocr_sections:
+                # OCR 成功：内容已入库，但要如实告诉用户「这是识别结果，可能有误差」
+                return LoadResult(
+                    sections=ocr_sections,
+                    needs_ocr=True,
+                    warning="该文件为扫描件，已用 OCR 识别文字，可能存在识别误差。",
+                )
             result.needs_ocr = True
             result.warning = (
                 f"该文件疑似扫描件（平均每页仅 {average:.1f} 个可提取字符），"
-                "内容可能未能入库，建议后续启用 OCR。"
+                "未能识别出文字内容，建议改用清晰的原文件。"
             )
 
     return result
+
+
+def _ocr_pdf(path: Path, page_count: int, *, settings: Settings) -> list[RawSection]:
+    """扫描件 PDF 逐页 OCR。OCR 关闭、或整篇都没识别出文字时返回空列表。"""
+    if not settings.ocr_enabled:
+        logger.info("OCR 已关闭，跳过扫描件识别：%s", path.name)
+        return []
+
+    from src.ingest.ocr import extract_pdf_text
+
+    sections: list[RawSection] = []
+    for page_no, text in extract_pdf_text(path, page_count):
+        cleaned = clean_text(text)
+        if cleaned:
+            sections.append(RawSection(text=cleaned, page=page_no))
+    return sections
+
+
+def _load_image(path: Path, *, settings: Settings) -> LoadResult:
+    """图片文件 OCR。识别不到文字时给出明确告警，而不是静默入库空文档。"""
+    if not settings.ocr_enabled:
+        raise UnsupportedFileType(f"未启用 OCR，暂不支持图片文件：{path.name}")
+
+    from src.ingest.ocr import extract_image_text
+
+    text = clean_text(extract_image_text(path))
+    if not text:
+        return LoadResult(warning="未能从图片中识别到文字，请确认图片清晰、包含文字。")
+    return LoadResult(sections=[RawSection(text=text)])
 
 
 def _docx_table_text(table) -> str:
@@ -196,15 +242,16 @@ def _load_docx(path: Path) -> LoadResult:
     return LoadResult(sections=sections)
 
 
-def load_document(path: str | Path) -> LoadResult:
+def load_document(path: str | Path, *, settings: Settings | None = None) -> LoadResult:
     """解析文档，返回文本段落与告警。
 
     Raises:
-        UnsupportedFileType: 后缀不在白名单（FR-05）。
+        UnsupportedFileType: 后缀不在白名单（FR-05），或图片遇上 OCR 被关闭。
         ParseError: 文件不存在、损坏、加密或无法解码。
     """
     target = Path(path)
     suffix = target.suffix.lower()
+    cfg = settings or get_settings()
 
     if suffix not in ALLOWED_SUFFIXES:
         supported = "、".join(sorted(ALLOWED_SUFFIXES))
@@ -218,9 +265,11 @@ def load_document(path: str | Path) -> LoadResult:
         raise ParseError(f"不是文件：{target}")
 
     if suffix == ".pdf":
-        result = _load_pdf(target)
+        result = _load_pdf(target, settings=cfg)
     elif suffix == ".docx":
         result = _load_docx(target)
+    elif suffix in IMAGE_SUFFIXES:
+        result = _load_image(target, settings=cfg)
     else:
         result = _load_plain(target)
 

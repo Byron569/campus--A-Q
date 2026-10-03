@@ -86,6 +86,7 @@ def ingest_file(
     store: VectorStore | None = None,
     batch_size: int = EMBED_BATCH_SIZE,
     db_path: Path | str | None = None,
+    filename: str | None = None,
     settings: Settings | None = None,
 ) -> IngestResult:
     """把一个文件完整入库。
@@ -111,13 +112,17 @@ def ingest_file(
     target = Path(path)
     started = time.perf_counter()
     resolved_settings = settings or get_settings()
+    # 显示名与存储路径是两回事：网页上传会把文件落成 `{doc_id}_原名`，
+    # 若直接用 path.name，前缀会进 documents.filename 与引用卡片（实测出现过
+    # 「1_机房通知.png」）。调用方（网页 / CLI）应显式传原始文件名。
+    display_name = filename or target.name
 
     # 个人资料必须有归属，否则 Chroma 元数据会落成 user_id=-1 且 is_public=0，
     # 任何查询都过滤不到，等于静默丢数据
     if not is_public and user_id is None:
         raise IngestError("个人资料必须指定 user_id，否则入库后任何人都检索不到")
 
-    load_result = load_document(target)
+    load_result = load_document(target, settings=resolved_settings)
     if load_result.is_empty:
         raise IngestError(load_result.warning or "未能从文件中提取到文本")
 
@@ -131,7 +136,7 @@ def ingest_file(
 
     if doc_id is None:
         doc_id = create_document(
-            filename=target.name,
+            filename=display_name,
             filetype=target.suffix.lower().lstrip("."),
             category=resolved_category,
             size_bytes=target.stat().st_size if target.is_file() else 0,
@@ -146,6 +151,7 @@ def ingest_file(
     _persist_original(
         target,
         doc_id=doc_id,
+        display_name=display_name,
         user_id=user_id,
         is_public=is_public,
         settings=resolved_settings,
@@ -162,7 +168,7 @@ def ingest_file(
         user_id=user_id,
         is_public=is_public,
         category=resolved_category,
-        filename=target.name,
+        filename=display_name,
     )
 
     done = 0
@@ -199,17 +205,23 @@ def ingest_file(
 
 
 def _persist_original(
-    source: Path, *, doc_id: int, user_id: int | None, is_public: bool, settings: Settings
+    source: Path,
+    *,
+    doc_id: int,
+    display_name: str,
+    user_id: int | None,
+    is_public: bool,
+    settings: Settings,
 ) -> None:
     """把原始文件复制到 uploads 的标准位置（若已在同一路径则跳过）。
 
-    路径规则见 `src/files.py`；网页上传的 `stage_upload` 已按同一规则落盘，
-    因此走异步任务时这里会因路径相同而跳过，不会重复复制。
+    目标路径按**显示名**计算：网页上传的 source 本身就是 `{doc_id}_原名`，
+    用 source.name 会算出 `{doc_id}_{doc_id}_原名` 这种重复前缀（实测出现过）。
     """
     destination = stored_path(
         owner_id=None if is_public else user_id,
         doc_id=doc_id,
-        filename=source.name,
+        filename=display_name,
         settings=settings,
     )
     if source.resolve() == destination.resolve():
@@ -219,4 +231,4 @@ def _persist_original(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     except OSError as exc:
-        raise IngestError(f"原始文件落盘失败：{source.name}（{exc}）") from exc
+        raise IngestError(f"原始文件落盘失败：{display_name}（{exc}）") from exc

@@ -30,6 +30,7 @@ import streamlit as st
 
 from config.settings import (
     ALLOWED_SUFFIXES,
+    IMAGE_SUFFIXES,
     UNCATEGORIZED_KEY,
     Settings,
     category_options,
@@ -100,16 +101,20 @@ def validate_upload(filename: str, size_bytes: int, *, settings: Settings | None
         return f"不支持的文件类型：{suffix or filename}（支持：{supported}）"
 
     cfg = settings or get_settings()
+    # 图片靠 OCR 才能取出文字：关闭 OCR 时必须在此拒绝，否则入库后是一份空文档
+    if suffix in IMAGE_SUFFIXES and not cfg.ocr_enabled:
+        return f"当前未启用 OCR，无法识别图片：{filename}"
     if size_bytes > cfg.max_upload_bytes:
         return f"文件超过 {cfg.max_upload_mb}MB 上限"
     return ""
-
 
 
 @dataclass
 class StagedUpload:
     doc_id: int
     path: Path
+    # 原始文件名（落盘后会带 `{doc_id}_` 前缀，但引用卡片要显示这个名字）
+    filename: str
 
 
 def stage_upload(
@@ -153,7 +158,7 @@ def stage_upload(
         soft_delete_document(doc_id, db_path=settings.database_path)
         raise IngestError(f"文件保存失败：{filename}（{exc}）") from exc
 
-    return StagedUpload(doc_id=doc_id, path=target)
+    return StagedUpload(doc_id=doc_id, path=target, filename=filename)
 
 
 def enqueue_new(
@@ -182,6 +187,9 @@ def enqueue_new(
         user_id=user_id,
         is_public=is_public,
         category=category,
+        # 显示名必须显式传：落盘路径带 `{doc_id}_` 前缀，直接用文件名会把前缀
+        # 带进引用卡片（实测出现过「1_机房通知.png」）
+        filename=staged.filename,
         store=store,
         db_path=settings.database_path,
     )
@@ -222,6 +230,7 @@ def retry_document(doc_id: int, *, store: VectorStore, settings: Settings) -> No
         user_id=document.user_id,
         is_public=document.is_public,
         category=document.category,
+        filename=document.filename,
         store=store,
         db_path=settings.database_path,
     )

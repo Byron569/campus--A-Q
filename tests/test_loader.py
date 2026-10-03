@@ -227,12 +227,12 @@ def test_load_docx_keeps_tables_in_document_order(tmp_path: Path) -> None:
 
 
 def test_unsupported_suffix_raises(tmp_path: Path) -> None:
-    target = tmp_path / "photo.png"
+    target = tmp_path / "setup.exe"
     target.write_bytes(b"fake")
 
     with pytest.raises(UnsupportedFileType) as excinfo:
         load_document(target)
-    assert ".png" in str(excinfo.value)
+    assert ".exe" in str(excinfo.value)
 
 
 def test_uppercase_suffix_is_accepted(tmp_path: Path) -> None:

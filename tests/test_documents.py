@@ -202,6 +202,33 @@ def test_enqueue_new_starts_fresh_task(settings: Settings, db: Path, store: Vect
     assert get_document(staged.doc_id, db_path=settings.database_path).chunk_count == task.total_chunks
 
 
+def test_enqueue_new_keeps_display_filename(
+    settings: Settings, db: Path, store: VectorStore
+) -> None:
+    """落盘名带 `{doc_id}_` 前缀，但文档显示名与引用元数据必须是原始文件名。
+
+    实测曾出现：引用卡片显示「1_机房通知.png」，且额外落盘一份「1_1_机房通知.png」。
+    """
+    staged = stage_upload(
+        "通知.txt", CONTENT, category="admin", is_public=True, user_id=None, settings=settings
+    )
+
+    task_id = enqueue_new(
+        staged, category="admin", is_public=True, user_id=None, store=store, settings=settings
+    )
+    task = wait_for_task(task_id, settings)
+
+    assert task.status == TASK_DONE
+    assert get_document(staged.doc_id, db_path=settings.database_path).filename == "通知.txt"
+
+    # 只应存在一份原始文件，没有重复前缀的副本
+    files = sorted(p.name for p in settings.uploads_path.rglob("*") if p.is_file())
+    assert files == [f"{staged.doc_id}_通知.txt"]
+
+    raw = store._store.get(where={"doc_id": {"$eq": staged.doc_id}})  # noqa: SLF001
+    assert {meta["filename"] for meta in raw["metadatas"]} == {"通知.txt"}
+
+
 # ==================== 删除级联（M1-A5） ====================
 
 
@@ -211,8 +238,8 @@ def test_delete_document_clears_record_vectors_and_file(
     staged, task_id = stage_with_task(settings)
     result = ingest_file(
         staged.path, category="admin", is_public=True, user_id=None,
-        doc_id=staged.doc_id, task_id=task_id, store=store,
-        db_path=settings.database_path,
+        doc_id=staged.doc_id, task_id=task_id, filename=staged.filename,
+        store=store, db_path=settings.database_path,
     )
     assert store.count() > 0
 

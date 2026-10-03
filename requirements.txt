@@ -19,6 +19,12 @@ jieba>=0.42.1
 pypdf>=4.3
 python-docx>=1.1
 
+# ========== OCR（二期：图片 / 扫描件入库）==========
+# 设计原指定 PaddleOCR，因依赖树过大且会把 numpy 升到 2.x，经客户裁决改用
+# RapidOCR（ONNX，复用 onnxruntime，模型随包内置）；pypdfium2 用于栅格化扫描件 PDF
+rapidocr-onnxruntime>=1.4
+pypdfium2>=4.30
+
 # ========== 配置 ==========
 pydantic-settings>=2.4
 python-dotenv>=1.0

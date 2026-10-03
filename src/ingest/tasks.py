@@ -52,6 +52,7 @@ def submit_ingest(
     user_id: int | None,
     is_public: bool = False,
     category: str = UNCATEGORIZED_KEY,
+    filename: str | None = None,
     store: VectorStore | None = None,
     batch_size: int = EMBED_BATCH_SIZE,
     db_path: Path | str | None = None,
@@ -60,6 +61,9 @@ def submit_ingest(
 
     调用方需先落 `documents` 与 `ingest_tasks(pending)` 记录，并把两者的 id 传进来。
     幂等防重（DR-07）由调用方在创建任务前用 `repository.exists_active_task` 完成。
+
+    `filename` 是**显示名**；网页上传的落盘路径带 `{doc_id}_` 前缀，不显式传会把
+    前缀带进引用卡片。留空时取 `path` 的文件名。
     """
     thread = threading.Thread(
         target=_run_ingest,
@@ -70,6 +74,7 @@ def submit_ingest(
             "user_id": user_id,
             "is_public": is_public,
             "category": category,
+            "filename": filename,
             "store": store,
             "batch_size": batch_size,
             "db_path": db_path,
@@ -90,6 +95,7 @@ def _run_ingest(
     user_id: int | None,
     is_public: bool,
     category: str,
+    filename: str | None,
     store: VectorStore | None,
     batch_size: int,
     db_path: Path | str | None,
@@ -106,6 +112,7 @@ def _run_ingest(
             user_id=user_id,
             doc_id=doc_id,
             task_id=task_id,
+            filename=filename,
             store=store,
             batch_size=batch_size,
             db_path=db_path,

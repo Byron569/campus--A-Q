@@ -70,6 +70,8 @@
 - macOS 或 Windows，64 位
 - 不需要 Docker，不需要 Ollama
 - 首次运行需联网下载本地 Embedding 模型（约 100 MB）
+- OCR（图片 / 扫描件入库）使用 RapidOCR（ONNX），模型随包内置、无需额外下载；
+  首次识别会加载约 10 秒，可用 `OCR_ENABLED=false` 关闭
 
 ## 安装
 
