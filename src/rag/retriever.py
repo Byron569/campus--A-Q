@@ -38,12 +38,47 @@ logger = logging.getLogger(__name__)
 # RRF 平滑常数，沿用信息检索中的常用取值 60
 RRF_K = 60
 
+# BM25 路的内容词过滤（FB-3.5 实测 + 客户裁决）。
+#
+# 背景：BM25 路不套相似度阈值（DR-01），只要有词元交集就算候选。真实语料里
+# 存在 99 片的大文档，虚词与标点（的 / 是 / ？/ 多少 / 如何）足以让任意问题都
+# 命中它，于是「两路皆空才拒答」永不成立——30 题评测集实测拒答正确率 0%，
+# 且这些噪声会把向量路命中的正确切片挤出上下文，导致模型自答「暂无相关资料」。
+#
+# 处理：命中判定只用「内容词元」——长度 ≥ 2、不在停用词表内、且含字母/数字/汉字。
+# 该偏离已登记，见 docs/09 §10。
+_MIN_TOKEN_LENGTH = 2
+
+_STOPWORDS = frozenset(
+    """
+    的 是 在 了 和 与 及 或 我 你 他 她 它 我们 你们 他们 这 那 哪 哪个 哪些
+    什么 怎么 怎样 如何 为什么 多少 几点 可以 能否 是否 能 要 会 有 不 没
+    不能 需要 应该 请问 一下 吗 呢 吧 啊 呀 哦 嗯 之 其 该 等 以及 关于 对于
+    通过 进行 就是 也是 还是 只 都 也 就 还 又 而 但 但是 因为 所以 如果
+    虽然 然后 并且 而且 一个 这个 那个
+    """.split()
+)
+
 
 def _tokenize(text: str) -> list[str]:
     """jieba 分词，去掉纯空白 token。"""
     import jieba
 
     return [token for token in jieba.lcut(text or "") if token.strip()]
+
+
+def _has_word_char(token: str) -> bool:
+    """token 里至少有一个字母、数字或汉字，纯标点（如「？」）不算。"""
+    return any(char.isalnum() or "\u4e00" <= char <= "\u9fff" for char in token)
+
+
+def _content_tokens(text: str) -> list[str]:
+    """用于 BM25 命中的内容词元：去停用词、去单字、去纯标点。"""
+    return [
+        token
+        for token in _tokenize(text)
+        if len(token) >= _MIN_TOKEN_LENGTH and token not in _STOPWORDS and _has_word_char(token)
+    ]
 
 
 class HybridRetriever:
@@ -75,25 +110,29 @@ class HybridRetriever:
         )
 
     def _bm25_route(self, query: str) -> list[SearchHit]:
-        """关键词路：**不套用相似度阈值**，只要有词命中即可作为候选。"""
+        """关键词路：**不套用相似度阈值**，只要有内容词命中即可作为候选。
+
+        命中判定用 `_content_tokens` 过滤后的词元（去停用词 / 单字 / 标点），
+        否则虚词会让任意问题都命中大文档，拒答永不触发（见文件顶部说明）。
+        """
         corpus = self.store.list_chunks(user_id=self.user_id, category=self.category)
         if not corpus:
             return []
 
-        query_tokens = set(_tokenize(query))
+        query_tokens = set(_content_tokens(query))
         if not query_tokens:
             return []
 
         from rank_bm25 import BM25Okapi
 
-        tokenized = [_tokenize(hit.text) for hit in corpus]
+        tokenized = [_content_tokens(hit.text) for hit in corpus]
         # 语料全是标点等无法分词的文本时，BM25Okapi 的平均长度会取到 0 而在打分时除零
         if not any(tokenized):
             return []
 
         scores = BM25Okapi(tokenized).get_scores(list(query_tokens))
 
-        # 命中判定用「分词集合是否有交集」，而不是「BM25 分数 > 0」：
+        # 命中判定用「内容词元是否有交集」，而不是「BM25 分数 > 0」：
         # 某词出现在过半文档时 BM25 的 idf 可能为负，按分数过滤会漏掉真正命中的切片。
         candidates = [
             (float(score), hit)

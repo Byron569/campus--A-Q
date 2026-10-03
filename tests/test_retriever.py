@@ -129,6 +129,32 @@ def test_bm25_route_drops_chunks_without_keyword_hit(
     assert make(store, strict, user_id=None).search("火星采矿条例") == []
 
 
+def test_bm25_route_ignores_stopword_only_overlap(
+    store: VectorStore, settings: Settings
+) -> None:
+    """只有虚词/标点重叠不算命中（FB-3.5 裁决）。
+
+    真实语料里的大文档几乎含所有虚词，若 BM25 认虚词，任意问题都会「命中」，
+    库外问题永远拒答不掉（30 题评测集实测拒答正确率 0% 的根因）。
+    """
+    add(store, "本教程介绍编译原理实验的步骤与工具。", doc_id=1, is_public=True)
+    strict = settings.model_copy(update={"retrieve_score_threshold": 0.99})
+
+    # 只有「是」「多少」「？」等虚词与标点重叠
+    assert make(store, strict, user_id=None).search("比特币今天价格是多少？") == []
+
+
+def test_bm25_route_still_hits_on_content_words(store: VectorStore, settings: Settings) -> None:
+    """停用词过滤不能误伤内容词：内容词重叠仍要命中。"""
+    add(store, "宿舍搬迁需要提前三个工作日申请。", doc_id=1, is_public=True)
+    strict = settings.model_copy(update={"retrieve_score_threshold": 0.99})
+
+    hits = make(store, strict, user_id=None).search("提前几个工作日申请")
+
+    assert hits
+    assert hits[0].matched_by == "bm25"
+
+
 # ==================== 权限过滤（FR-31）====================
 
 
