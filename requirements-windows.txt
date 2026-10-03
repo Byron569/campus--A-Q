@@ -1,0 +1,19 @@
+# Windows 依赖清单（M3-13）
+#
+# 与 requirements.txt 的唯一差异：显式声明 torch 并指向 PyTorch 官方 CPU 轮子源。
+# sentence-transformers 会传递依赖 torch，而默认源在部分平台会解析到体积数百 MB 的
+# GPU 版本；校园机器多无 NVIDIA 驱动，装 CPU 版体积与兼容性都更可控。
+#
+# 安装：
+#     .venv\Scripts\python.exe -m pip install -r requirements-windows.txt
+#
+# 说明：--extra-index-url 是「追加源」，pip 仍可能从默认源取 torch。若确需强制 CPU 版，
+# 先装基础依赖、再单独装 torch：
+#     pip install -r requirements.txt
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+-r requirements.txt
+
+torch>=2.2

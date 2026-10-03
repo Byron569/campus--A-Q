@@ -6,7 +6,11 @@ REM 默认走社区镜像 hf-mirror.com；若你的网络能直连官方，可�
 REM   set HF_ENDPOINT=https://huggingface.co
 REM 覆盖本脚本的默认值。
 REM
-REM 注意：Windows 路径与依赖差异尚未实测（见 docs/03 的 M3-13），本脚本为初版。
+REM 依赖安装（CPU 版 torch，避免拉到体积数百 MB 的 GPU 版本）：
+REM   .venv\Scripts\python.exe -m pip install -r requirements-windows.txt
+REM
+REM 提示：本脚本尚未在真实 Windows 机器上实测（M3-A5 跨设备验收需实机确认），
+REM 若该机防火墙拦截，请放行入站 TCP 8501（见 README「局域网访问」）。
 setlocal
 cd /d "%~dp0"
 

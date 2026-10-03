@@ -5,15 +5,64 @@
 
 一期范围：校园知识库问答（OCR、日程管理、Agent 工具调度归二期）。
 
-## 当前进度
+## 效果数据
 
-| 里程碑 | 状态 |
+30 题人工评测集（20 可回答 + 5 不可回答 + 5 多轮追问），绑定真实校园资料，实测四项指标：
+
+| 指标 | 结果 | 说明 |
+| --- | --- | --- |
+| 准确率 | **100%**（30/30） | 可回答题答对、库外题正确拒答 |
+| 引用命中率 | **100%**（20/20） | 回答引用的来源命中期望文档 |
+| 拒答正确率 | **100%**（5/5） | 库外问题一律拒答，不编造 |
+| 追问改写成功率 | **100%**（5/5） | 多轮追问经改写后仍召回正确资料 |
+
+- 知识库：9 份文档、137 个切片，本地 BGE 向量化（文本不出本机）
+- 单元测试：`pytest` **299 passed**
+- 复现命令见下文「评测」
+
+> 指标公式与评测集字段定义写在 `scripts/run_eval.py` 与 `eval/campus_qa_eval.jsonl` 的注释里。
+> 调大模型有随机性，重复运行个别题目可能有措辞差异，指标可能小幅波动。
+
+## 架构
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  界面层  Streamlit（app.py + src/ui/）                    │
+│  问答 / 我的文档 / 管理员 / 设置 / 关于                    │
+├──────────────────────────────────────────────────────────┤
+│  RAG 层  src/rag/                                         │
+│  chain.py    改写 → 检索 → 拒答判定 → 生成 → 引用解析 → 降级│
+│  retriever.py 向量路 + BM25 路加权融合（阈值只管向量路）    │
+│  rewrite.py  多轮追问改写（失败退化为原问题）              │
+├──────────────────────────────────────────────────────────┤
+│  接入与入库  src/ingest/                                  │
+│  loader.py   解析 PDF / DOCX / TXT / MD                   │
+│  splitter.py 中文两阶段切片（标题与其后正文同块）           │
+│  pipeline.py 分批向量化 + 写库；tasks.py 后台异步入库       │
+├──────────────────────────────────────────────────────────┤
+│  存储层  src/store/                                       │
+│  chroma.py 向量库唯一入口（强制 user_id 过滤，漏传即抛错）  │
+│  db.py     SQLite（WAL + 写锁退避重试）                    │
+├──────────────────────────────────────────────────────────┤
+│  模型可插拔  src/providers/                               │
+│  llm.py（deepseek / dashscope / zhipu / openai / custom）  │
+│  embedding.py（本地 BGE / 云端）                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+分层与关键取舍见 `docs/02-架构设计.md`。
+
+## 界面截图
+
+> 以下为截图位，图片待补（放入 `docs/assets/screenshots/` 即可正常显示）。
+
+| 文件 | 画面 |
 | --- | --- |
-| M1 数据底座（能入库、能检索） | 进行中：命令行入库与检索已可用；网页端（M1-18）待做 |
-| M2 问答与界面 | 未开始 |
-| M3 账号、隔离与跨设备 | 未开始 |
-
-> 本文档为初版。架构图、评测效果数据与界面截图位将在 M3-15 补齐。
+| `docs/assets/screenshots/01-login.png` | 登录 / 注册页（协议勾选） |
+| `docs/assets/screenshots/02-qa.png` | 问答页：回答带 `【来源N】` 与引用卡片 |
+| `docs/assets/screenshots/03-documents.png` | 我的文档：上传、进度、列表 |
+| `docs/assets/screenshots/04-admin.png` | 管理员页：公共文档与用户管理 |
+| `docs/assets/screenshots/05-settings.png` | 设置页：显示名 / 改密 / 注销 |
 
 ## 环境要求
 
@@ -26,9 +75,9 @@
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env             # 然后填入 LLM_API_KEY
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt      # Windows: pip install -r requirements-windows.txt
+cp .env.example .env                 # Windows: copy .env.example .env，然后填入 LLM_API_KEY
 ```
 
 ### 本地 Embedding 模型与下载镜像
@@ -53,7 +102,7 @@ export HF_ENDPOINT=https://hf-mirror.com       # Windows: set HF_ENDPOINT=https:
 
 | 文件 | 内容 | 是否提交 |
 | --- | --- | --- |
-| `.env` | 模型供应商、检索参数、端口与路径 | 否（含密钥） |
+| `.env` | 模型供应商、检索参数、端口与路径、管理员账号 | 否（含密钥） |
 | `config/knowledge_base.yaml` | 学校信息与知识库分类 | 是 |
 
 换一所学校只需改 `knowledge_base.yaml` 与资料，不用动代码。全部配置项见 `docs/02-架构设计.md` §10。
@@ -61,22 +110,47 @@ export HF_ENDPOINT=https://hf-mirror.com       # Windows: set HF_ENDPOINT=https:
 ## 使用
 
 ```bash
-# 1. 生成 8 份模拟校园资料（真实资料未到位时用于开发与验证）
-python scripts/make_samples.py
+# 1. 初始化管理员账号（读取 .env 的 ADMIN_USERNAME / ADMIN_PASSWORD）
+python scripts/seed_users.py
 
-# 2. 按分类批量入库（公共文档）
+# 2.（可选）生成 8 份模拟校园资料，用于开发与验证
+python scripts/make_samples.py
 python scripts/ingest_cli.py data/samples/freshman --public --category freshman
 python scripts/ingest_cli.py data/samples/admin    --public --category admin
 python scripts/ingest_cli.py data/samples/course   --public --category course
 
-# 3. 检索验证（M1 阶段只验证向量路，BM25 混合检索在 M2 实现）
+# 3.（可选）命令行检索验证
 python scripts/ingest_cli.py --query "搬宿舍需要提前申请吗"
 
 # 4. 启动网页
 ./run.sh                          # Windows: run.bat
 ```
 
-局域网访问：手机 / 其他电脑打开 `http://<本机内网IP>:8501`。
+浏览器打开 `http://127.0.0.1:8501`，用管理员账号登录后即可上传资料并提问。
+
+### 局域网访问（手机 / 其他电脑）
+
+`run.sh` / `run.bat` 默认绑定 `0.0.0.0`，同局域网的设备访问 `http://<本机内网IP>:8501` 即可。
+
+需要放行防火墙：
+
+- **Windows**：首次启动若弹出「Windows 安全中心」提示，勾选「专用网络」并允许；
+  若未弹出，到「Windows Defender 防火墙 → 允许应用通过防火墙」放行 Python，
+  或手动放行入站 TCP `8501`。
+- **macOS**：控制面板「网络 → 防火墙」中允许 Python 接受传入连接（首次启动会弹出询问）。
+
+内网 IP 查看：macOS `ipconfig getifaddr en0`；Windows `ipconfig`（看「IPv4 地址」）。
+
+> 局域网内为明文 HTTP，仅建议在可信校园网络内使用。
+
+## 评测
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com python scripts/run_eval.py
+```
+
+输出准确率、引用命中率、拒答正确率、追问改写成功率四项指标；评测写入临时库、跑完即删，
+不会影响真实 `data/app.db`。加 `--json` 输出机器可读结果，加 `--verbose` 查看逐题明细。
 
 ## 测试
 
@@ -87,17 +161,28 @@ pytest
 ## 项目结构
 
 ```
-app.py                 入口与路由（M1-18 起）
-config/                配置中心与知识库业务配置
-src/ingest/            解析、切片、入库流水线、异步任务
-src/store/             SQLite 与 Chroma 封装（向量访问唯一入口）
-src/providers/         LLM 与 Embedding 可插拔层
-src/repository.py      全部数据访问
-scripts/               模拟资料生成、批量入库与检索 CLI
-docs/                  需求、架构、任务、原型、接口、设计与开发计划
-tests/                 单元测试
-data/                  运行期数据（不入库）
+app.py                  入口与路由、登录态与角色守卫
+config/                 配置中心与知识库业务配置
+src/ui/                 各页面（问答 / 文档 / 管理员 / 设置 / 关于 / 登录）
+src/rag/                改写、混合检索、问答主链路、提示词
+src/ingest/             解析、切片、入库流水线、异步任务
+src/store/              SQLite 与 Chroma 封装（向量访问唯一入口）
+src/auth/               密码哈希与认证服务
+src/providers/          LLM 与 Embedding 可插拔层
+src/repository.py       全部数据访问
+eval/                   30 题评测集
+scripts/                模拟资料生成、批量入库、管理员初始化、评测
+docs/                   需求、架构、任务、原型、接口、设计与开发计划
+tests/                  单元测试
+data/                   运行期数据（不入库）
 ```
+
+## 安全与隐私
+
+- Embedding 本地运行，文本向量不出本机；问答日志脱敏（不存问题原文与 user_id），保留 90 天后自动清理
+- 向量检索强制按 `user_id` 过滤，个人资料仅本人可见；公共文档全员可见
+- 密码以 pbkdf2 加盐哈希存储（20 万次迭代），不存明文
+- 上传白名单（PDF / DOCX / TXT / MD）与 20 MB 上限
 
 ## 文档
 
