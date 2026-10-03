@@ -8,9 +8,11 @@
 三个交互细节值得说明：
 
 1. **登录与注册同页切换、不改 URL**（PG-01 明确要求），靠 `st.session_state` 的模式标记切换。
-2. **协议勾选框放在表单之外**：表单内的控件只有点提交按钮才会把值发给服务端，
-   勾选框若在表单里，注册按钮的「未勾选即不可用」就没法实时生效。
-   放在表单外，勾选会立刻触发一次重跑，按钮的 disabled 状态随即更新。
+2. **协议同意用「按钮式开关」而不是 `st.checkbox`**（偏离 PG-01 的「勾选框」表述）：
+   Streamlit 的勾选框由 react-aria 的按压组件实现，浏览器自动化无法命中它
+   （DOM 取证显示控件没被遮挡，是工具打不中），导致这条合规流程**无法验收**。
+   改成按钮后：点一下即同意、再点一下撤回，标签随之变化，命中面积还更大。
+   强制同意的规则不变——未同意时注册按钮禁用，服务端 `register(agreed=False)` 也会拒绝。
 3. **文本框放表单里**：Streamlit 的 `text_input` 只在失焦/回车时才提交值，
    直接配普通按钮会出现「填了却没带上」的问题（FB-2.4 踩过）。
 """
@@ -31,6 +33,8 @@ from src.ui import about
 STATE_USER_ID = "auth_user_id"
 # 当前表单模式（登录 / 注册）
 STATE_MODE = "auth_mode"
+# 注册页的协议同意开关（退出登录时一并清掉，同意不该跨会话保留）
+STATE_AGREED = "register-agreed"
 
 MODE_LOGIN = "login"
 MODE_REGISTER = "register"
@@ -47,8 +51,8 @@ def start_session(user: User) -> None:
 def logout() -> None:
     """退出登录，回登录页。
 
-    必须同时清掉**页面级的会话态**（当前会话 id 等），否则下一个登录的人
-    会直接落进上一个人的会话里（数据隔离红线）。
+    必须同时清掉**页面级的会话态**（当前会话 id、协议同意标记等），否则下一个
+    登录的人会直接落进上一个人的会话里（数据隔离红线），或带着上一个人的同意状态。
     """
     st.session_state.pop(STATE_USER_ID, None)
     st.session_state.pop(STATE_MODE, None)
@@ -57,9 +61,15 @@ def logout() -> None:
 
 
 def _clear_page_state() -> None:
-    from src.ui import chat
+    from src.ui import chat, settings as ui_settings
 
-    for key in (chat.STATE_CONVERSATION, chat.STATE_CATEGORY, chat.STATE_NOTICE):
+    for key in (
+        chat.STATE_CONVERSATION,
+        chat.STATE_CATEGORY,
+        chat.STATE_NOTICE,
+        STATE_AGREED,
+        ui_settings.STATE_DELETE_AGREED,
+    ):
         st.session_state.pop(key, None)
 
 
@@ -129,8 +139,19 @@ def _render_register(settings: Settings) -> None:
         unsafe_allow_html=True,
     )
 
-    # 放在表单之外，勾选后立即重跑，下面的注册按钮才会实时变可用（PG-01）
-    agreed = st.checkbox("我已阅读并同意《用户协议与隐私说明》", key="register-agreed")
+    # 同意开关：用按钮实现，理由见模块开头第 2 点
+    agreed = bool(st.session_state.get(STATE_AGREED, False))
+    if st.button(
+        "已同意《用户协议与隐私说明》（点击撤回）"
+        if agreed
+        else "我已阅读并同意《用户协议与隐私说明》",
+        key="register-agree-toggle",
+        type="primary" if agreed else "secondary",
+        use_container_width=True,
+    ):
+        st.session_state[STATE_AGREED] = not agreed
+        st.rerun()
+
     with st.popover("查看《用户协议与隐私说明》", use_container_width=True):
         for title, body in about.privacy_sections():
             st.markdown(f"**{title}**")

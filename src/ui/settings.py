@@ -7,7 +7,10 @@
 三个表单都用 `st.form`：Streamlit 的 `text_input` 只在失焦/回车时提交值，
 配普通按钮会出现「填了却没带上」（FB-2.4 踩过这个坑）。
 
-注销的「二次确认」按原型实现为：**先勾选「我已知晓数据不可恢复」，确认按钮才可用**。
+注销的「二次确认」按原型实现为：**先确认「我已知晓数据不可恢复」，确认按钮才可用**。
+该确认与注册页的协议同意一样改用**按钮式开关**而不是 `st.checkbox`——
+Streamlit 的勾选框在浏览器自动化下点不动，会让这条危险操作无法验收
+（详见 `src/ui/login.py` 模块开头的说明）。
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ from src.repository import User
 from src.store.chroma import VectorStore
 
 STATE_NOTICE = "settings_notice"
+# 注销确认开关（退出登录时一并清掉）
+STATE_DELETE_AGREED = "delete-account-agreed"
 
 
 def render(*, settings: Settings, user: User, store: VectorStore) -> None:
@@ -108,7 +113,16 @@ def _render_delete_account(user: User, *, settings: Settings, store: VectorStore
         unsafe_allow_html=True,
     )
 
-    agreed = st.checkbox("我已知晓数据不可恢复", key="delete-account-agreed")
+    agreed = bool(st.session_state.get(STATE_DELETE_AGREED, False))
+    if st.button(
+        "已确认数据不可恢复（点击撤回）" if agreed else "我已知晓数据不可恢复",
+        key="delete-account-agree-toggle",
+        type="primary" if agreed else "secondary",
+        use_container_width=True,
+    ):
+        st.session_state[STATE_DELETE_AGREED] = not agreed
+        st.rerun()
+
     if st.button(
         "确认注销账号",
         key="delete-account-confirm",
