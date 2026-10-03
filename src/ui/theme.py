@@ -485,6 +485,32 @@ COMPONENTS = """
 
 /* 答案操作行（反馈 / 复制）与下载按钮的紧凑间距 */
 .cqa-answer-actions { margin-top: var(--space-1); }
+
+/* 侧边栏会话列表（PG-02 左侧会话列表，与共用导航合并到同一侧栏） */
+[data-testid="stSidebar"] .cqa-conv-head {
+  margin-top: var(--space-2);
+  padding: 10px 11px 4px;
+  border-top: 1px solid var(--sidebar-border);
+  font-size: 12px; font-weight: 600; color: var(--muted-foreground);
+}
+/* 侧栏内的元素间距被上面的 gap:0 压掉了，这里补回来 */
+[data-testid="stSidebar"] .stButton { margin-bottom: 6px; }
+[data-testid="stSidebar"] .stButton > button {
+  width: 100%; justify-content: flex-start;
+  font-size: 13px !important;
+}
+/* 会话行 = 会话名 + ⋯ 菜单，必须留在同一行。
+   Streamlit 的列默认 flex-wrap: wrap 且列有 min-width，248px 侧栏里放不下就会
+  把 ⋯ 挤到第二行；这里改成不换行并允许列收缩到 0。 */
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+  flex-wrap: nowrap !important;
+  gap: var(--space-1) !important;
+}
+[data-testid="stSidebar"] [data-testid="stColumn"] { min-width: 0 !important; }
+[data-testid="stSidebar"] .stPopover { margin-bottom: 6px; }
+[data-testid="stSidebar"] .stPopover > div > button {
+  width: 100%; padding: 0 !important; justify-content: center;
+}
 """
 
 

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 
@@ -31,9 +32,13 @@ from src.repository import (
     ROLE_USER,
     add_feedback,
     create_conversation,
+    delete_conversation,
+    get_conversation,
     get_feedback,
+    list_conversations,
     list_messages,
     list_sources_by_message,
+    rename_conversation,
 )
 from src.store.chroma import VectorStore
 
@@ -135,6 +140,8 @@ def category_filter_options() -> list[tuple[str, str | None]]:
 
 def render(*, settings: Settings, store: VectorStore) -> None:
     """渲染整个问答页。"""
+    conversation_id = _ensure_conversation(settings)
+
     st.markdown('<div class="cqa-page-title">问答</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="cqa-page-desc">只依据知识库资料作答，结论标注【来源N】并附引用卡片；'
@@ -142,7 +149,6 @@ def render(*, settings: Settings, store: VectorStore) -> None:
         unsafe_allow_html=True,
     )
 
-    conversation_id = _ensure_conversation(settings)
     messages = list_messages(conversation_id, db_path=settings.database_path)
     sources = {
         message.id: list_sources_by_message(message.id, db_path=settings.database_path)
@@ -164,14 +170,81 @@ def render(*, settings: Settings, store: VectorStore) -> None:
             store=store,
         )
 
+    # 必须放在最后：本轮提问可能刚补上会话标题（_ensure_title），
+    # 若在提问之前渲染列表，标题要等下一次 rerun 才刷新得过来
+    _render_conversation_list(settings=settings, conversation_id=conversation_id)
+
 
 def _ensure_conversation(settings: Settings) -> int:
-    """取当前会话；首次进入时建一条空会话并记住（M2-06 接手多会话管理）。"""
+    """取当前会话；没有或已失效（例如被删）时新建一条并记住。"""
     conversation_id = st.session_state.get(STATE_CONVERSATION)
-    if conversation_id is None:
+    if conversation_id is None or get_conversation(
+        conversation_id, db_path=settings.database_path
+    ) is None:
         conversation_id = create_conversation(ANONYMOUS_OWNER_ID, db_path=settings.database_path)
         st.session_state[STATE_CONVERSATION] = conversation_id
     return int(conversation_id)
+
+
+def _ensure_title(conversation_id: int, question: str, *, settings: Settings) -> None:
+    """首问之后补上会话标题（FR-12：标题默认取首问前 15 字）。"""
+    conversation = get_conversation(conversation_id, db_path=settings.database_path)
+    if conversation is not None and not conversation.title:
+        rename_conversation(
+            conversation_id, question[:TITLE_MAX_LEN], db_path=settings.database_path
+        )
+
+
+def _render_conversation_list(*, settings: Settings, conversation_id: int) -> None:
+    """侧边栏会话列表：新建 / 切换 / 重命名 / 删除（FR-12）。
+
+    设计说明（近似实现）：docs/05 PG-02 的「左侧会话列表」与 G-03 的共用导航栏，
+    在 Streamlit 里合并到同一个侧边栏——它本身就是页面左侧。原型要求的
+    「右键 / 悬停出现菜单」在 Streamlit 里无对应交互，改为每行一个「⋯」浮层。
+    """
+    with st.sidebar:
+        st.markdown('<div class="cqa-conv-head">会话</div>', unsafe_allow_html=True)
+        if st.button("＋ 新建会话", key="conv-new", use_container_width=True):
+            st.session_state[STATE_CONVERSATION] = create_conversation(
+                ANONYMOUS_OWNER_ID, db_path=settings.database_path
+            )
+            st.rerun()
+
+        rows, _ = list_conversations(
+            ANONYMOUS_OWNER_ID, page_size=50, db_path=settings.database_path
+        )
+        for row in rows:
+            _render_conversation_row(row, current=conversation_id, settings=settings)
+
+
+def _render_conversation_row(row, *, current: int, settings: Settings) -> None:
+    title = row.title or "新会话"
+    label = f"● {title}" if row.id == current else title
+
+    name_col, menu_col = st.columns([5, 1])
+    if name_col.button(label, key=f"conv-{row.id}", use_container_width=True):
+        st.session_state[STATE_CONVERSATION] = row.id
+        st.rerun()
+
+    with menu_col.popover("⋯", key=f"conv-menu-{row.id}"):
+        # 必须用 form 包住：Streamlit 的 text_input 只有在失焦/回车时才把值提交给服务端，
+        # 直接点普通按钮时服务端拿到的还是旧值，改名会「看起来没生效」
+        with st.form(key=f"conv-rename-form-{row.id}", border=False):
+            new_title = st.text_input("会话名称", value=row.title, key=f"conv-title-{row.id}")
+            if st.form_submit_button("保存名称", type="primary"):
+                rename_conversation(row.id, new_title, db_path=settings.database_path)
+                st.rerun()
+
+        st.markdown(
+            f'<div class="cqa-page-desc">确认删除《{html.escape(title)}》？'
+            "该会话的消息与引用一并清除，不可恢复。</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("确认删除", key=f"conv-delete-{row.id}", type="primary"):
+            delete_conversation(row.id, db_path=settings.database_path)
+            if st.session_state.get(STATE_CONVERSATION) == row.id:
+                st.session_state.pop(STATE_CONVERSATION, None)
+            st.rerun()
 
 
 def _render_toolbar(*, settings: Settings, messages, sources: dict[int, list[dict]]) -> str | None:
@@ -359,6 +432,8 @@ def _handle_submit(
         result = turn.result
         if result is None:  # pragma: no cover - 生成器必然回填
             return
+
+        _ensure_title(conversation_id, question, settings=settings)
 
         # 引用读库回显，与落库内容天然一致（C-06）
         latest = list_messages(conversation_id, limit=1, db_path=settings.database_path)

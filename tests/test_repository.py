@@ -27,17 +27,20 @@ from src.repository import (
     create_conversation,
     create_document,
     create_task,
+    delete_conversation,
     exists_active_task,
     get_conversation,
     get_document,
     get_feedback,
     get_task,
     get_task_by_doc,
+    list_conversations,
     list_documents,
     list_messages,
     list_sources_by_message,
     list_tasks_by_user,
     recover_stale_tasks,
+    rename_conversation,
     reset_task,
     soft_delete_document,
     update_chunk_count,
@@ -372,6 +375,80 @@ def test_add_message_touches_conversation_updated_at(db: Path) -> None:
     add_message(conversation_id, ROLE_USER, "新消息", db_path=db)
 
     assert get_conversation(conversation_id, db_path=db).updated_at > "2000-01-01 00:00:00"
+
+
+# ==================== 会话管理（M2-06 / FR-12）====================
+
+
+def test_list_conversations_most_recent_first(db: Path) -> None:
+    first = create_conversation(1, title="第一个", db_path=db)
+    second = create_conversation(1, title="第二个", db_path=db)
+    with get_conn(db) as conn:
+        conn.execute("UPDATE conversations SET updated_at = '2026-01-01 00:00:00' WHERE id = ?", (first,))
+        conn.execute("UPDATE conversations SET updated_at = '2026-02-01 00:00:00' WHERE id = ?", (second,))
+
+    rows, total = list_conversations(1, db_path=db)
+
+    assert total == 2
+    assert [row.id for row in rows] == [second, first]
+
+
+def test_list_conversations_is_per_user(db: Path) -> None:
+    create_conversation(1, title="我的", db_path=db)
+    create_conversation(2, title="别人的", db_path=db)
+
+    rows, total = list_conversations(1, db_path=db)
+
+    assert total == 1
+    assert rows[0].title == "我的"
+
+
+def test_rename_conversation(db: Path) -> None:
+    conversation_id = create_conversation(1, title="旧名", db_path=db)
+
+    assert rename_conversation(conversation_id, "新名", db_path=db) is True
+    assert get_conversation(conversation_id, db_path=db).title == "新名"
+    assert rename_conversation(999, "无处可改", db_path=db) is False
+
+
+def test_delete_conversation_removes_messages_sources_and_feedback(db: Path) -> None:
+    """删会话不能留下半删状态：消息、引用、反馈必须一起清掉。"""
+    conversation_id = create_conversation(1, db_path=db)
+    user_message = add_message(conversation_id, ROLE_USER, "问题", db_path=db)
+    assistant = add_message(conversation_id, ROLE_ASSISTANT, "答案【来源1】", db_path=db)
+    add_sources(
+        assistant,
+        [SearchHit(text="片段", score=0.8, filename="a.pdf", doc_id=1,
+                   chunk_index=0, category="freshman", matched_by="vector")],
+        db_path=db,
+    )
+    add_feedback(assistant, 1, RATING_USEFUL, db_path=db)
+
+    removed = delete_conversation(conversation_id, db_path=db)
+
+    assert removed == 2
+    assert get_conversation(conversation_id, db_path=db) is None
+    assert list_messages(conversation_id, db_path=db) == []
+    assert list_sources_by_message(assistant, db_path=db) == []
+    assert get_feedback(assistant, 1, db_path=db) is None
+    with get_conn(db) as conn:
+        left = conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
+    assert left == 0
+    assert user_message  # 用户消息同样被删掉（仅用于表明它确实建过）
+
+
+def test_delete_conversation_keeps_others(db: Path) -> None:
+    keep = create_conversation(1, title="保留", db_path=db)
+    drop = create_conversation(1, title="删除", db_path=db)
+    add_message(keep, ROLE_USER, "保留的消息", db_path=db)
+    add_message(drop, ROLE_USER, "要删的消息", db_path=db)
+
+    delete_conversation(drop, db_path=db)
+
+    rows, total = list_conversations(1, db_path=db)
+    assert total == 1
+    assert rows[0].id == keep
+    assert [m.content for m in list_messages(keep, db_path=db)] == ["保留的消息"]
 
 
 # ==================== message_sources / qa_metrics ====================

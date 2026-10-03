@@ -417,6 +417,71 @@ def get_conversation(conversation_id: int, db_path: PathLike = None) -> Conversa
     return _to_conversation(row) if row else None
 
 
+def list_conversations(
+    user_id: int, *, page: int = 1, page_size: int = 20, db_path: PathLike = None
+) -> tuple[list[Conversation], int]:
+    """按最近活动倒序列出会话（FR-12）。"""
+    offset = max(page - 1, 0) * page_size
+    with get_conn(db_path) as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?", (user_id,)
+        ).fetchone()["n"]
+        rows = conn.execute(
+            """
+            SELECT * FROM conversations
+             WHERE user_id = ?
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ? OFFSET ?
+            """,
+            (user_id, page_size, offset),
+        ).fetchall()
+    return [_to_conversation(row) for row in rows], int(total)
+
+
+def rename_conversation(
+    conversation_id: int, title: str, db_path: PathLike = None
+) -> bool:
+    """重命名会话。空标题存 NULL，展示层再兜底。"""
+    with get_conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE conversations
+               SET title = ?, updated_at = datetime('now','localtime')
+             WHERE id = ?
+            """,
+            ((title or "").strip() or None, conversation_id),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_conversation(conversation_id: int, db_path: PathLike = None) -> int:
+    """删除会话及其全部消息、引用与反馈，返回删除的消息条数。
+
+    几张表之间有外键，必须按依赖顺序删且放在**同一个事务**里，
+    否则会留下「消息删了、引用还在」的半删状态（docs/02 §4.9 的同类要求）。
+    """
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            DELETE FROM feedback WHERE message_id IN
+                (SELECT id FROM messages WHERE conversation_id = ?)
+            """,
+            (conversation_id,),
+        )
+        conn.execute(
+            """
+            DELETE FROM message_sources WHERE message_id IN
+                (SELECT id FROM messages WHERE conversation_id = ?)
+            """,
+            (conversation_id,),
+        )
+        removed = conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
+        ).rowcount
+        conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+    return int(removed)
+
+
 def add_message(
     conversation_id: int, role: str, content: str, db_path: PathLike = None
 ) -> int:
