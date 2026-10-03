@@ -94,6 +94,22 @@ def test_cards_and_panels_do_not_use_box_shadow() -> None:
     assert "var(--shadow-dialog)" in _rule(theme.OVERRIDES, '[data-testid="stPopoverBody"]')
 
 
+def test_sidebar_width_matches_design_rail() -> None:
+    """设计模板 rail 宽 248px；Streamlit 默认 300px，且宽度写在内联 style 上。
+
+    只能对展开态覆盖，折叠态必须保持 Streamlit 自己的 min/max 0 + translateX，
+    否则折叠动画会坏掉。
+    """
+    css = theme.stylesheet()
+    rule = _rule(css, '[data-testid="stSidebar"][aria-expanded="true"]')
+
+    assert "width: 248px !important" in rule
+    assert "min-width: 248px !important" in rule
+    assert "max-width: 248px !important" in rule
+    # 折叠态不得被覆盖
+    assert "stSidebar\"][aria-expanded=\"false\"]" not in css
+
+
 def test_sidebar_nav_uses_shared_rail_styles() -> None:
     """docs/07 §6 / §8.2：侧边栏用 --sidebar 配色，选中项用 --sidebar-accent 语义。
 

@@ -280,6 +280,22 @@ hr, [data-testid="stDivider"] { border-color: var(--border) !important; }
   background: var(--sidebar);
   border-right: 1px solid var(--sidebar-border);
 }
+/* 宽度对齐设计模板的 rail（248px）。
+   Streamlit 的宽度写在内联 style="width:300px" 上，min/max 写在随版本变化的
+   emotion 类上，所以必须 !important 覆盖。
+   只作用于展开态：折叠态靠 aria-expanded="false" 的 min/max 0 + translateX
+   实现，这里不碰，避免把折叠动画弄坏。 */
+[data-testid="stSidebar"][aria-expanded="true"] {
+  width: 248px !important;
+  min-width: 248px !important;
+  max-width: 248px !important;
+}
+/* 宽度既然按设计钉死了，Streamlit 自带的拖拽调宽手柄就成了摆设，直接隐掉。
+   注意：手柄外层还有一层无 testid / 无 class 的匿名包裹（8px 绝对定位），
+   隐掉手柄后它仍会让侧栏的 scrollWidth 比 clientWidth 大 6px。该残留实测
+   无可见影响（内部滚动容器的 scrollWidth == clientWidth，不出现滚动条，
+   也不裁切任何内容），且没有稳定的选择器可选中它，故不加 hack 处理。 */
+[data-testid="stSidebarResizeHandle"] { display: none !important; }
 [data-testid="stSidebar"] * { color: var(--sidebar-foreground); }
 
 /* ---------- 布局 ---------- */
