@@ -92,7 +92,14 @@ def schedule_text(
     items = filter_schedules(schedules, range_key=range_key, now=now)
     label = RANGE_LABELS.get(range_key, "")
     if not items:
-        return f"你当前没有{label}的日程。可以在「日程」页添加作业或考试。"
+        # 区分「一条都没加过」与「有记录但不在当前范围」：否则用户刚加完日程却在
+        # 「未完成」里看不到，会误以为调度没生效（实测反馈过这个问题）。
+        if schedules:
+            return (
+                f"你当前没有{label}的日程；共有 {len(schedules)} 条日程记录，"
+                "可在「日程」页查看全部。"
+            )
+        return "你还没有添加任何日程。可以在「日程」页添加作业或考试。"
 
     lines = [f"你{label}的日程共 {len(items)} 项："]
     for item in items:

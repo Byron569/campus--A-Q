@@ -74,6 +74,19 @@ def test_rule_route_weak_term_needs_mine_word() -> None:
     assert runtime.rule_route("我的作业有哪些").name == tools.TOOL_SCHEDULES
 
 
+def test_rule_route_covers_colloquial_task_phrasings() -> None:
+    """口语化的日程问法必须能进调度。
+
+    实测反馈：先前「我有什么要交的」「我有什么要做的」既不被规则命中、
+    也不触发 LLM 兜底（信号词表没覆盖），问题根本进不了日程工具。
+    """
+    for question in ("我有什么要交的", "我有什么要做的", "我的任务有哪些", "我最近有什么课表"):
+        choice = runtime.rule_route(question)
+        assert choice is not None, question
+        assert choice.name == tools.TOOL_SCHEDULES, question
+        assert runtime.has_tool_signal(question), question
+
+
 def test_parse_range_variants() -> None:
     assert runtime.parse_range("今天的日程") == tools.RANGE_TODAY
     assert runtime.parse_range("本周的安排") == tools.RANGE_WEEK
@@ -167,6 +180,17 @@ def test_schedule_text_empty_state() -> None:
     text = tools.schedule_text([], now=NOW)
     assert "没有" in text
     assert "日程" in text
+
+
+def test_schedule_text_notes_records_outside_range() -> None:
+    """有记录但不在当前范围时要说清楚，避免用户误以为调度没生效。"""
+    items = [_schedule(id=1, due_at="2026-09-01 09:00", status="done")]
+    text = tools.schedule_text(items, range_key=tools.RANGE_PENDING, now=NOW)
+    assert "共有 1 条日程记录" in text
+
+
+def test_schedule_text_without_any_record() -> None:
+    assert "还没有添加任何日程" in tools.schedule_text([], now=NOW)
 
 
 # ==================== 工具执行（落库与隔离） ====================
