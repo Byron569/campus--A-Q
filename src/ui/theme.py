@@ -124,6 +124,10 @@ h1, [data-testid="stHeading"] h1 { font-size: 24px !important; line-height: 34px
 h2, [data-testid="stHeading"] h2 { font-size: 18px !important; line-height: 28px; font-weight: 500; }
 h3, [data-testid="stHeading"] h3 { font-size: 15px !important; line-height: 24px; font-weight: 500; }
 [data-testid="stMarkdownContainer"] p { font-size: 14px; line-height: 1.6; }
+/* 长串（URL、连续英文/数字、代码）不得把页面顶出横向滚动 */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] code { overflow-wrap: anywhere; }
 [data-testid="stCaptionContainer"], .stCaption, small {
   font-size: 13px !important; color: var(--muted-foreground) !important;
 }
@@ -346,6 +350,52 @@ hr, [data-testid="stDivider"] { border-color: var(--border) !important; }
     visibility: visible !important;
     opacity: 1 !important;
   }
+}
+
+/* ---------- 手机端适配（≤640px）----------
+   手机验收要求「能用」：内容不横向溢出、控件都点得到。三处调整：
+   1) 主内容左右内边距收窄，把有限宽度让给内容；
+   2) 列表行允许换行——文件名长时状态胶囊落到第二行，而不是把整行撑出屏幕；
+   3) 按钮与消息气泡收紧，避免多列按钮行在窄屏被挤出可视区。 */
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"] {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+    padding-top: var(--space-4);
+  }
+  .cqa-page-title { font-size: 20px; line-height: 28px; }
+  .cqa-page-desc { font-size: 12px; }
+
+  /* 列表行：状态胶囊换到第二行右对齐，不再与文件名抢宽度 */
+  .cqa-row { flex-wrap: wrap; padding: 10px var(--space-3); }
+  .cqa-rowstatus { flex: 1 1 100%; display: flex; justify-content: flex-end; }
+  .cqa-fileicon { width: 24px; height: 24px; }
+
+  /* 按钮 / 气泡 / 提醒条收紧 */
+  .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+    padding: 0 10px !important;
+  }
+  [data-testid="stChatMessage"] { padding: var(--space-2) var(--space-3); }
+  .cqa-remind { padding: var(--space-2) var(--space-3); }
+  .cqa-remind-item { flex-wrap: wrap; }
+
+  /* 窄屏下多列改为纵向堆叠。
+     只写 flex-wrap:wrap + min-width:0 时列会一路收缩，里面的按钮却收不动，
+     按钮会溢出列、被祖先的 overflow-x:hidden 裁掉（实测「下一页」「删除」
+     被裁约 20px，右侧点不到）。直接让每个列占满整行最稳，按钮不再被挤。 */
+  [data-testid="stMainBlockContainer"] [data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap !important;
+    gap: var(--space-2) !important;
+  }
+  [data-testid="stMainBlockContainer"]
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    flex: 1 1 100% !important;
+    min-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* 宽表格改为在自身内部横向滚动，而不是撑开整页 */
+  [data-testid="stMarkdownContainer"] table { display: block; max-width: 100%; overflow-x: auto; }
 }
 """
 
