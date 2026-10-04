@@ -24,6 +24,7 @@ import streamlit as st
 from config.settings import Settings
 from src.repository import (
     SCHEDULE_DONE,
+    SCHEDULE_DUE_FORMAT as DUE_FORMAT,
     SCHEDULE_EXAM,
     SCHEDULE_HOMEWORK,
     SCHEDULE_OTHER,
@@ -34,6 +35,8 @@ from src.repository import (
     delete_schedule,
     list_schedules,
     mark_schedules_reminded,
+    parse_schedule_due as parse_due,
+    schedule_days_until as days_until,
     set_schedule_status,
     update_schedule,
 )
@@ -51,23 +54,11 @@ TYPE_BADGES = {
     SCHEDULE_OTHER: "其他",
 }
 
-DUE_FORMAT = "%Y-%m-%d %H:%M"
-
 # 提醒可提前的天数上限（校验用）
 MAX_REMIND_DAYS = 30
 
 
 # ==================== 纯逻辑（不依赖 Streamlit） ====================
-
-
-def parse_due(due_at: str) -> datetime:
-    return datetime.strptime(due_at, DUE_FORMAT)
-
-
-def days_until(schedule: Schedule, *, now: datetime | None = None) -> int:
-    """距截止还有几天（按自然日算，可为负表示已逾期）。"""
-    today = (now or datetime.now()).date()
-    return (parse_due(schedule.due_at).date() - today).days
 
 
 def reminder_due(schedule: Schedule, *, now: datetime | None = None) -> bool:

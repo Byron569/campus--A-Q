@@ -899,6 +899,22 @@ def _to_schedule(row) -> Schedule:
     )
 
 
+# 日程截止时间的存储格式。解析逻辑放在数据访问层，供日程页与 Agent 工具共用，
+# 避免两处各写一份、格式改了对不上（二期 2.2 引入工具调用时上移）。
+SCHEDULE_DUE_FORMAT = "%Y-%m-%d %H:%M"
+
+
+def parse_schedule_due(due_at: str) -> datetime:
+    """解析日程截止时间（`YYYY-MM-DD HH:MM`，本地时间）。"""
+    return datetime.strptime(due_at, SCHEDULE_DUE_FORMAT)
+
+
+def schedule_days_until(schedule: Schedule, *, now: datetime | None = None) -> int:
+    """距截止还有几天（按自然日算，负数表示已逾期）。"""
+    today = (now or datetime.now()).date()
+    return (parse_schedule_due(schedule.due_at).date() - today).days
+
+
 @retry_on_write_lock
 def create_schedule(
     *,

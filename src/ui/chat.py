@@ -23,6 +23,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config.settings import Settings, category_options
+from src.agent import runtime, tools
 from src.rag.chain import stream_answer
 from src.rag.prompts import parse_source_numbers
 from src.repository import (
@@ -421,8 +422,28 @@ def _handle_submit(
     with st.chat_message("assistant"):
         hint = st.empty()
         hint.markdown(
-            '<div class="cqa-hint">正在检索资料…</div>', unsafe_allow_html=True
+            '<div class="cqa-hint">正在理解你的问题…</div>', unsafe_allow_html=True
         )
+
+        # Agent 工具调度（二期 2.2）：规则优先、LLM 兜底；未命中即走知识库检索。
+        # settings.agent_enabled=False 时跳过调度，完全等价于二期前行为（一键回退）。
+        choice = (
+            runtime.decide(question, settings=settings)
+            if settings.agent_enabled
+            else runtime.ToolChoice(tools.TOOL_KNOWLEDGE)
+        )
+        if choice.name != tools.TOOL_KNOWLEDGE:
+            _handle_tool_answer(
+                choice,
+                question,
+                hint=hint,
+                conversation_id=conversation_id,
+                settings=settings,
+                user=user,
+            )
+            return
+
+        hint.markdown('<div class="cqa-hint">正在检索资料…</div>', unsafe_allow_html=True)
         turn = stream_answer(
             question,
             user.id,
@@ -455,3 +476,41 @@ def _handle_submit(
             settings=settings,
             user=user,
         )
+
+
+def _handle_tool_answer(
+    choice,
+    question: str,
+    *,
+    hint,
+    conversation_id: int,
+    settings: Settings,
+    user: User,
+) -> None:
+    """工具直答（查询日程 / 当前时间）：执行 → 上屏 → 反馈按钮。
+
+    工具回答没有引用来源，因此不渲染引用卡片；落库与指标由 `runtime.execute` 负责。
+    """
+    hint.markdown(
+        f'<div class="cqa-hint">正在{tools.TOOL_LABELS.get(choice.name, "处理")}…</div>',
+        unsafe_allow_html=True,
+    )
+    result = runtime.execute(
+        choice,
+        question,
+        user_id=user.id,
+        conversation_id=conversation_id,
+        settings=settings,
+        db_path=settings.database_path,
+    )
+    hint.empty()
+    st.markdown(result.text)
+
+    _ensure_title(conversation_id, question, settings=settings)
+    _render_answer_actions(
+        message_id=result.message_id,
+        content=result.text,
+        sources=[],
+        settings=settings,
+        user=user,
+    )

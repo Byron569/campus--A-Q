@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     # 关掉后图片后缀会被拒绝、扫描件 PDF 只保留「疑似扫描件」告警不入内容
     ocr_enabled: bool = True
 
+    # ---- Agent 工具调度（二期 2.2）----
+    # 关掉后问答一律走知识库检索（一键回退到二期前的行为）
+    agent_enabled: bool = True
+
     # ---- 路径 ----
     data_dir: Path = PROJECT_ROOT / "data"
     chroma_dir: Path | None = None
