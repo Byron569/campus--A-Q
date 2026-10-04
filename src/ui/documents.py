@@ -39,6 +39,7 @@ from config.settings import (
 from src.errors import CampusQAError, IngestError
 from src.files import stored_path
 from src.ingest.tasks import submit_ingest
+from src import summarize
 from src.repository import (
     DOC_ACTIVE,
     TASK_DONE,
@@ -52,9 +53,11 @@ from src.repository import (
     get_document,
     get_task_by_doc,
     list_documents,
+    list_summaries_by_doc,
     list_tasks_by_user,
     reset_task,
     soft_delete_document,
+    upsert_summary,
 )
 from src.store.chroma import VectorStore
 
@@ -286,6 +289,7 @@ def render(*, settings: Settings, store: VectorStore, user: User) -> None:
     _render_upload(settings=settings, store=store, user=user)
     _render_progress(settings=settings, user=user)
     _render_list(settings=settings, store=store, user=user)
+    _render_summarizer(settings=settings, store=store, user=user)
 
     # 必须放在最后：进度轮询结束时还会 st.rerun() 一次，若在它之前渲染，
     # 提交结果会只闪一下就没了
@@ -561,3 +565,99 @@ def _render_row(document, *, settings: Settings, store: VectorStore) -> None:
                     st.rerun()
                 except CampusQAError as exc:
                     st.error(str(exc))
+
+
+# ==================== 课件助手（二期 2.4）====================
+#
+# 交付说明：课件总结 / 复习提纲生成。产物落库（`summaries`），同一文档同一产物
+# 只保留最新一份，重新生成即覆盖；删除文档时会一并清掉它的产物（见 soft_delete_document）。
+# 只读取**当前用户可访问**的切片（公共 + 本人），权限过滤由 VectorStore.list_chunks 负责。
+
+
+def _render_summarizer(*, settings: Settings, store: VectorStore, user: User) -> None:
+    _panel_head("课件助手", "选择一份课件，生成内容总结或复习提纲")
+
+    documents, _ = list_documents(
+        user_id=user.id,
+        include_public=True,
+        page=1,
+        page_size=100,
+        db_path=settings.database_path,
+    )
+    if not documents:
+        st.markdown(
+            '<div class="cqa-panel"><div class="cqa-empty">'
+            "还没有可用于生成的课件，先上传一份讲义试试。</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    options = {
+        f"{doc.filename}（{'公共' if doc.is_public else '我的'}）": doc for doc in documents
+    }
+    picked = st.selectbox("选择课件", list(options), key="summarize-doc")
+    document = options[picked]
+
+    saved = {
+        item.kind: item
+        for item in list_summaries_by_doc(
+            user.id, document.id, db_path=settings.database_path
+        )
+    }
+    for kind, item in saved.items():
+        _render_saved_summary(item, kind=kind, document=document)
+
+    kind_label = st.selectbox(
+        "产物类型", list(summarize.KIND_LABELS.values()), key="summarize-kind"
+    )
+    kind = _kind_from_label(kind_label)
+    button_label = "重新生成" if kind in saved else "生成"
+    if st.button(button_label, key="summarize-run", type="primary"):
+        _do_summarize(document, kind=kind, settings=settings, store=store, user=user)
+
+
+def _kind_from_label(label: str) -> str:
+    for key, name in summarize.KIND_LABELS.items():
+        if name == label:
+            return key
+    return summarize.KIND_SUMMARY
+
+
+def _render_saved_summary(item, *, kind: str, document) -> None:
+    title = summarize.KIND_LABELS.get(kind, kind)
+    with st.expander(f"{title} · 更新于 {item.updated_at} · 基于 {item.source_chunks} 个切片"):
+        st.markdown(item.content)
+        st.download_button(
+            "下载 Markdown",
+            data=item.content,
+            file_name=f"{Path(document.filename).stem}-{title}.md",
+            mime="text/markdown",
+            key=f"summarize-download-{item.id}",
+        )
+
+
+def _do_summarize(document, *, kind: str, settings: Settings, store: VectorStore, user: User) -> None:
+    """生成产物并落库。失败只提示、不写库，不留半成品。"""
+    try:
+        with st.spinner("正在生成，内容较多时可能需要一分钟…"):
+            hits = store.list_chunks(user_id=user.id, doc_id=document.id)
+            text = summarize.generate(
+                hits, filename=document.filename, kind=kind, settings=settings
+            )
+    except CampusQAError as exc:
+        st.error(str(exc))
+        return
+
+    upsert_summary(
+        user_id=user.id,
+        doc_id=document.id,
+        kind=kind,
+        content=text,
+        source_chunks=len(summarize.usable_chunks(hits)),
+        db_path=settings.database_path,
+    )
+    # 结果暂存后重跑，刷新下方已生成区块（直接打印会被 rerun 冲掉）
+    st.session_state[STATE_RESULTS] = [
+        ("success", f"{summarize.KIND_LABELS[kind]}已生成：{document.filename}")
+    ]
+    st.rerun()

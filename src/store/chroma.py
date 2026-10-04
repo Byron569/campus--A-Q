@@ -176,14 +176,20 @@ class VectorStore:
         *,
         user_id: int | None,
         category: str | None = None,
+        doc_id: int | None = None,
     ) -> list[SearchHit]:
         """列出该身份可访问的**全部**切片，供 BM25 路构建关键词索引（docs/02 §4.3）。
 
         与 `search` 走同一套权限过滤（FR-31），`user_id` 同样必传：这里没有相似度
         可言，故 `score=None`；不做阈值过滤（阈值只作用于向量路，DR-01）。
         上层不得绕过本方法去读 Chroma。
+
+        `doc_id` 可选：给课件总结（二期 2.4）取**单份文档**的全部切片，
+        权限过滤仍然是前置条件，绝不能因加了 doc_id 就放宽可见范围。
         """
         where = self._build_filter(user_id, category)
+        if doc_id is not None:
+            where = {"$and": [where, {"doc_id": {"$eq": int(doc_id)}}]}
 
         try:
             data = self._store.get(where=where)

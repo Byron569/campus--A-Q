@@ -67,7 +67,7 @@ def make_doc(db: Path, filename: str = "学生手册.pdf", **kwargs) -> int:
 # ==================== 建表 ====================
 
 
-def test_init_db_creates_all_nine_tables(db: Path) -> None:
+def test_init_db_creates_all_ten_tables(db: Path) -> None:
     with get_conn(db) as conn:
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -83,6 +83,7 @@ def test_init_db_creates_all_nine_tables(db: Path) -> None:
         "feedback",
         "qa_metrics",
         "schedules",
+        "summaries",
     }
 
 

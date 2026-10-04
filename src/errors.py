@@ -73,3 +73,10 @@ class BackupError(CampusQAError):
 
     文案面向管理员：备份文件损坏、版本不支持、目标库非空却未授权覆盖等。
     """
+
+
+class SummarizeError(CampusQAError):
+    """课件总结 / 复习提纲生成失败（二期 2.4）。
+
+    文案面向用户：内容为空、模型调用失败或返回空结果。
+    """

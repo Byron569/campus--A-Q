@@ -134,6 +134,19 @@ CREATE TABLE IF NOT EXISTS schedules (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS summaries (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    doc_id         INTEGER NOT NULL,
+    kind           TEXT NOT NULL,                 -- summary / outline
+    content        TEXT NOT NULL,                 -- Markdown 正文
+    source_chunks  INTEGER NOT NULL DEFAULT 0,    -- 生成时用到的切片数
+    created_at     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE (user_id, doc_id, kind),               -- 同一文档同一产物只保留最新一份
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
 """
 
 INDEXES = """
@@ -148,6 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_msg     ON feedback(message_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_created  ON qa_metrics(created_at);
 CREATE INDEX IF NOT EXISTS idx_schedules_user   ON schedules(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_schedules_due    ON schedules(user_id, due_at);
+CREATE INDEX IF NOT EXISTS idx_summaries_user   ON summaries(user_id, doc_id);
+CREATE INDEX IF NOT EXISTS idx_summaries_doc    ON summaries(doc_id);
 """
 
 

@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     # 关掉后问答一律走知识库检索（一键回退到二期前的行为）
     agent_enabled: bool = True
 
+    # ---- 课件总结 / 复习提纲（二期 2.4）----
+    # map-reduce 每批处理的切片数：越大调用次数越少但单次上下文越长
+    summarize_batch_chunks: int = 8
+
     # ---- 路径 ----
     data_dir: Path = PROJECT_ROOT / "data"
     chroma_dir: Path | None = None

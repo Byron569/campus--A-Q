@@ -297,7 +297,7 @@ def delete_user(user_id: int, db_path: PathLike = None) -> None:
     """删除账号在 SQLite 中的**全部**关联数据（FR-25，单事务）。
 
     顺序按外键依赖：feedback → message_sources → messages → conversations
-    → ingest_tasks → documents → schedules → users。
+    → ingest_tasks → documents → schedules → summaries → users。
 
     向量库与磁盘文件不在这里处理（数据访问层不碰向量层）——
     由 `auth.service.delete_account` 先清向量与文件、再调本函数，
@@ -338,6 +338,7 @@ def delete_user(user_id: int, db_path: PathLike = None) -> None:
         conn.execute("DELETE FROM ingest_tasks WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM documents WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM schedules WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM summaries WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
@@ -432,7 +433,11 @@ def list_documents(
 
 @retry_on_write_lock
 def soft_delete_document(doc_id: int, db_path: PathLike = None) -> bool:
-    """软删除：置 status='deleted'。向量的清理由调用方负责（见 docs/02 §4.9）。"""
+    """软删除：置 status='deleted'。向量的清理由调用方负责（见 docs/02 §4.9）。
+
+    同时清掉该文档已生成的课件总结 / 复习提纲（二期 2.4）：源文档已删，
+    留着这些产物只会在「课件助手」里变成打不开的悬空记录。
+    """
     with get_conn(db_path) as conn:
         cursor = conn.execute(
             """
@@ -442,6 +447,8 @@ def soft_delete_document(doc_id: int, db_path: PathLike = None) -> bool:
             """,
             (DOC_DELETED, doc_id, DOC_DELETED),
         )
+        if cursor.rowcount > 0:
+            conn.execute("DELETE FROM summaries WHERE doc_id = ?", (doc_id,))
         return cursor.rowcount > 0
 
 
@@ -1049,10 +1056,98 @@ def delete_schedule(schedule_id: int, db_path: PathLike = None) -> bool:
         return cursor.rowcount > 0
 
 
+# ==================== summaries（课件总结 / 复习提纲，二期 2.4）====================
+#
+# 产物是**个人数据**：即使是公共文档，每个人生成的总结也只属于其本人。
+# 同一用户对同一文档的同一产物只保留最新一份（UNIQUE 约束 + upsert 覆盖）。
+
+SUMMARY_KIND_SUMMARY = "summary"
+SUMMARY_KIND_OUTLINE = "outline"
+SUMMARY_KINDS = (SUMMARY_KIND_SUMMARY, SUMMARY_KIND_OUTLINE)
+
+
+@dataclass
+class Summary:
+    id: int
+    user_id: int
+    doc_id: int
+    kind: str
+    content: str
+    source_chunks: int
+    created_at: str
+    updated_at: str
+
+
+def _to_summary(row) -> Summary:
+    return Summary(
+        id=row["id"],
+        user_id=row["user_id"],
+        doc_id=row["doc_id"],
+        kind=row["kind"],
+        content=row["content"] or "",
+        source_chunks=row["source_chunks"] or 0,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+@retry_on_write_lock
+def upsert_summary(
+    *,
+    user_id: int,
+    doc_id: int,
+    kind: str,
+    content: str,
+    source_chunks: int = 0,
+    db_path: PathLike = None,
+) -> int:
+    """写入或覆盖一份产物，返回 summary_id（重新生成即覆盖旧的那一份）。"""
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO summaries (user_id, doc_id, kind, content, source_chunks)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, doc_id, kind) DO UPDATE SET
+                content = excluded.content,
+                source_chunks = excluded.source_chunks,
+                updated_at = datetime('now','localtime')
+            """,
+            (user_id, doc_id, kind, content, source_chunks),
+        )
+        row = conn.execute(
+            "SELECT id FROM summaries WHERE user_id = ? AND doc_id = ? AND kind = ?",
+            (user_id, doc_id, kind),
+        ).fetchone()
+        return int(row["id"])
+
+
+def get_summary(
+    user_id: int, doc_id: int, kind: str, db_path: PathLike = None
+) -> Summary | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM summaries WHERE user_id = ? AND doc_id = ? AND kind = ?",
+            (user_id, doc_id, kind),
+        ).fetchone()
+    return _to_summary(row) if row else None
+
+
+def list_summaries_by_doc(
+    user_id: int, doc_id: int, db_path: PathLike = None
+) -> list[Summary]:
+    """列出某用户对某文档已生成的全部产物（总结 / 提纲）。`user_id` 必传。"""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM summaries WHERE user_id = ? AND doc_id = ? ORDER BY kind",
+            (user_id, doc_id),
+        ).fetchall()
+    return [_to_summary(row) for row in rows]
+
+
 # ==================== 备份 / 恢复（FR-24，二期）====================
 #
 # 备份涉及的表与恢复顺序由外键依赖决定：users → documents → conversations
-# → messages → message_sources / feedback / schedules。
+# → messages → message_sources / feedback / schedules / summaries。
 # qa_metrics 是脱敏日志（90 天自动清理，可丢）、ingest_tasks 是瞬时状态，
 # 都不进备份。
 
@@ -1064,6 +1159,7 @@ BACKUP_TABLES = (
     "message_sources",
     "feedback",
     "schedules",
+    "summaries",
 )
 
 
